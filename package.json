@@ -1,0 +1,23 @@
+{
+  "name": "webmcp-selenium",
+  "version": "1.0.0",
+  "description": "A local MCP server that uses Selenium to crawl websites and a local ML model via Transformers.js to analyze the DOM for test recommendations.",
+  "type": "module",
+  "main": "build/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node build/index.js",
+    "dev": "ts-node src/index.ts"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.0.0",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "selenium-webdriver": "^4.27.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/selenium-webdriver": "^4.1.26",
+    "typescript": "^5.7.0"
+  }
+}
