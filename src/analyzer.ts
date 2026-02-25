@@ -1,35 +1,23 @@
 import { pipeline, FeatureExtractionPipeline } from "@huggingface/transformers";
-import { DomElement, PageSnapshot } from "./crawler.js";
+import { AnalysisResult, RiskyElement, TestCandidate } from "./types.js";
 
-/** A single element flagged as a testing risk. */
-export interface RiskyElement {
-  /** CSS-like path describing the element's location. */
-  path: string;
+// ---------------------------------------------------------------------------
+// DOM types (defined here — this module is browser-only)
+// ---------------------------------------------------------------------------
+
+export interface DomElement {
   tag: string;
   id?: string;
   classes?: string[];
-  /** Human-readable explanation of why this element is flagged. */
-  reason: string;
-  /** Higher value = higher priority for test coverage. */
-  riskScore: number;
+  role?: string;
+  ariaLabel?: string;
+  text?: string;
+  hasShadowRoot?: boolean;
+  isIframe?: boolean;
+  children?: DomElement[];
 }
 
-/** A candidate test case derived from a page snapshot. */
-export interface TestCandidate {
-  description: string;
-  /** Suggested stable locator strategy (CSS or XPath). */
-  locator: string;
-  riskScore: number;
-}
-
-/** Full output produced by the analyzer. */
-export interface AnalysisResult {
-  url: string;
-  title: string;
-  riskyElements: RiskyElement[];
-  priorityTestList: TestCandidate[];
-  consoleLogs: string[];
-}
+export { AnalysisResult, RiskyElement, TestCandidate } from "./types.js";
 
 /**
  * DomAnalyzer uses a local Transformers.js model (feature-extraction /
@@ -45,49 +33,52 @@ export class DomAnalyzer {
 
   /** Pre-load the embedding model so the first analysis call is fast. */
   async init(): Promise<void> {
-    // Try WebNN → WebGPU → cpu (fallback) in order of preference.
-    for (const device of ["webnn", "webgpu", "cpu"] as const) {
+    if (typeof window === "undefined") {
+      throw new Error("[analyzer] This module must run in a browser environment.");
+    }
+    // Try WebNN → WebGPU in order of preference (browser-only execution providers).
+    for (const device of ["webnn", "webgpu"] as const) {
       try {
         this.extractor = (await pipeline(
           "feature-extraction",
           "Xenova/all-MiniLM-L6-v2",
           { device }
         )) as FeatureExtractionPipeline;
-        console.error(`[analyzer] Model loaded on device: ${device}`);
+        console.log(`[analyzer] Model loaded on device: ${device}`);
         return;
       } catch {
-        console.error(
+        console.warn(
           `[analyzer] Device '${device}' unavailable, trying next…`
         );
       }
     }
-    throw new Error("[analyzer] Could not load model on any execution device.");
+    throw new Error("[analyzer] Could not load model. A browser with WebNN or WebGPU support is required.");
   }
 
   /**
-   * Analyze a PageSnapshot and return a prioritized list of test candidates.
-   *
-   * @param snapshot - The page snapshot produced by SiteCrawler.
+   * Extract the current page's DOM, score elements, and return a prioritized
+   * list of test candidates. Must be called from inside a browser page.
    */
-  async analyzeMetadata(snapshot: PageSnapshot): Promise<AnalysisResult> {
+  async analyzeCurrentPage(): Promise<AnalysisResult> {
     if (!this.extractor) {
       throw new Error("DomAnalyzer is not initialized. Call init() first.");
     }
 
+    const dom = extractDom();
     const riskyElements: RiskyElement[] = [];
-    this.collectRiskyElements(snapshot.dom, "", riskyElements);
+    this.collectRiskyElements(dom, "", riskyElements);
 
-    // Build test candidates from risky elements
     const priorityTestList: TestCandidate[] = await this.buildTestCandidates(
       riskyElements
     );
 
     return {
-      url: snapshot.url,
-      title: snapshot.title,
+      url: window.location.href,
+      title: document.title,
       riskyElements,
       priorityTestList,
-      consoleLogs: snapshot.consoleLogs,
+      // Console logs are captured by Selenium on the Node side; empty here.
+      consoleLogs: [],
     };
   }
 
@@ -198,6 +189,58 @@ export class DomAnalyzer {
 // ---------------------------------------------------------------------------
 // Pure utility functions
 // ---------------------------------------------------------------------------
+
+/**
+ * Walk document.body and return a simplified DomElement tree.
+ * Mirrors the extractDomScript logic that previously lived in crawler.ts.
+ */
+function extractDom(): DomElement[] {
+  const MAX_DEPTH = 5;
+  const SKIP_TAGS = new Set([
+    "SCRIPT",
+    "STYLE",
+    "NOSCRIPT",
+    "META",
+    "LINK",
+    "HEAD",
+  ]);
+
+  function extractNode(el: Element, depth: number): DomElement | null {
+    if (!el || depth > MAX_DEPTH) return null;
+    if (SKIP_TAGS.has(el.tagName)) return null;
+
+    const node: DomElement = { tag: el.tagName.toLowerCase() };
+
+    if (el.id) node.id = el.id;
+
+    const classes = Array.from(el.classList ?? []);
+    if (classes.length) node.classes = classes;
+
+    const role = el.getAttribute("role");
+    if (role) node.role = role;
+
+    const ariaLabel = el.getAttribute("aria-label");
+    if (ariaLabel) node.ariaLabel = ariaLabel;
+
+    const text = (el.textContent ?? "").trim().slice(0, 120);
+    if (text) node.text = text;
+
+    if ((el as HTMLElement & { shadowRoot: ShadowRoot | null }).shadowRoot)
+      node.hasShadowRoot = true;
+    if (el.tagName === "IFRAME") node.isIframe = true;
+
+    const children = Array.from(el.children)
+      .map((child) => extractNode(child, depth + 1))
+      .filter((n): n is DomElement => n !== null);
+    if (children.length) node.children = children;
+
+    return node;
+  }
+
+  return Array.from(document.body?.children ?? [])
+    .map((child) => extractNode(child, 1))
+    .filter((n): n is DomElement => n !== null);
+}
 
 function buildPath(el: DomElement, parentPath: string): string {
   let segment = el.tag;

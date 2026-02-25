@@ -17,18 +17,16 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
-import { SiteCrawler, PageSnapshot } from "./crawler.js";
-import { DomAnalyzer, AnalysisResult, TestCandidate } from "./analyzer.js";
+import { SiteCrawler } from "./crawler.js";
+import { AnalysisResult, TestCandidate } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Shared singletons (initialised once)
 // ---------------------------------------------------------------------------
 
 const crawler = new SiteCrawler();
-const analyzer = new DomAnalyzer();
 
-/** Most-recent crawl result, used by get_element_locator. */
-let lastSnapshot: PageSnapshot | null = null;
+/** Most-recent analysis result, used by get_element_locator. */
 let lastAnalysis: AnalysisResult | null = null;
 
 // ---------------------------------------------------------------------------
@@ -99,8 +97,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     try {
       await crawler.init();
-      lastSnapshot = await crawler.getPageSnapshot(url);
-      lastAnalysis = await analyzer.analyzeMetadata(lastSnapshot);
+      lastAnalysis = await crawler.crawlAndAnalyze(url);
     } finally {
       await crawler.close();
     }
@@ -191,9 +188,6 @@ function tokenize(text: string): string[] {
 // ---------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  // Initialise the ML model once at startup
-  await analyzer.init();
-
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("WebMCP-Selenium MCP server running on stdio");

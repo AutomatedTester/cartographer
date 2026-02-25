@@ -1,26 +1,8 @@
-import { Builder, By, WebDriver, logging } from "selenium-webdriver";
+import fs from "fs";
+import path from "path";
+import { Builder, WebDriver, logging } from "selenium-webdriver";
 import chrome from "selenium-webdriver/chrome.js";
-
-/** Simplified representation of a DOM element for model consumption. */
-export interface DomElement {
-  tag: string;
-  id?: string;
-  classes?: string[];
-  role?: string;
-  ariaLabel?: string;
-  text?: string;
-  hasShadowRoot?: boolean;
-  isIframe?: boolean;
-  children?: DomElement[];
-}
-
-/** The full snapshot returned by the crawler. */
-export interface PageSnapshot {
-  url: string;
-  title: string;
-  dom: DomElement[];
-  consoleLogs: string[];
-}
+import { AnalysisResult } from "./types.js";
 
 /**
  * SiteCrawler uses a headless Chrome instance managed by Selenium Manager
@@ -37,7 +19,9 @@ export class SiteCrawler {
       "--no-sandbox",
       "--disable-dev-shm-usage",
       "--disable-gpu",
-      "--log-level=3"
+      "--log-level=3",
+      // Allow injected scripts to bypass Content-Security-Policy headers
+      "--disable-web-security"
     );
 
     // Enable browser-side console log capture
@@ -51,31 +35,51 @@ export class SiteCrawler {
       .build();
   }
 
-  /** Navigate to a URL and return a cleaned PageSnapshot. */
-  async getPageSnapshot(url: string): Promise<PageSnapshot> {
+  /**
+   * Navigate to a URL, inject the analyzer bundle, run the ML analysis
+   * inside the page, and return the result.
+   *
+   * The async script timeout is raised to 120 s to account for model
+   * download time on the first run.
+   */
+  async crawlAndAnalyze(url: string): Promise<AnalysisResult> {
     if (!this.driver) {
       throw new Error("SiteCrawler is not initialized. Call init() first.");
     }
 
+    // Raise async-script timeout to handle model download on first run.
+    await this.driver.manage().setTimeouts({ script: 120_000 });
+
     await this.driver.get(url);
 
-    const title = await this.driver.getTitle();
+    // Read the pre-built browser bundle from disk and inject it into the page.
+    const bundlePath = path.resolve(process.cwd(), "build", "analyzer.browser.js");
+    const bundleSource = fs.readFileSync(bundlePath, "utf-8");
+    await this.driver.executeScript(bundleSource);
 
-    // Extract a simplified JSON DOM via in-page script
-    const dom: DomElement[] = await this.driver.executeScript<DomElement[]>(
-      extractDomScript
-    );
+    // Run the analysis asynchronously inside the page.
+    // Selenium passes the done-callback as the last element of `arguments`.
+    const result = await this.driver.executeAsyncScript<AnalysisResult>(`
+      const callback = arguments[arguments.length - 1];
+      (async () => {
+        try {
+          const analyzer = new window.DomAnalyzerBundle.DomAnalyzer();
+          await analyzer.init();
+          const result = await analyzer.analyzeCurrentPage();
+          callback(result);
+        } catch (err) {
+          callback({ error: err instanceof Error ? err.message : String(err) });
+        }
+      })();
+    `);
 
-    // Collect browser console logs
-    const rawLogs = await this.driver
-      .manage()
-      .logs()
-      .get(logging.Type.BROWSER);
-    const consoleLogs = rawLogs.map(
+    // Collect browser console logs and attach them to the result.
+    const rawLogs = await this.driver.manage().logs().get(logging.Type.BROWSER);
+    result.consoleLogs = rawLogs.map(
       (entry) => `[${entry.level.name}] ${entry.message}`
     );
 
-    return { url, title, dom, consoleLogs };
+    return result;
   }
 
   /** Quit the browser and release resources. */
@@ -86,50 +90,3 @@ export class SiteCrawler {
     }
   }
 }
-
-/**
- * Inline script that runs inside the browser to extract a simplified DOM tree.
- * Depth is capped at 5 levels to keep the payload manageable for the model.
- */
-const extractDomScript = `
-  const MAX_DEPTH = 5;
-  const SKIP_TAGS = new Set(['SCRIPT', 'STYLE', 'NOSCRIPT', 'META', 'LINK', 'HEAD']);
-
-  function extractNode(el, depth) {
-    if (!el || depth > MAX_DEPTH) return null;
-    if (SKIP_TAGS.has(el.tagName)) return null;
-
-    const node = {
-      tag: el.tagName.toLowerCase(),
-    };
-
-    if (el.id) node.id = el.id;
-
-    const classes = Array.from(el.classList || []);
-    if (classes.length) node.classes = classes;
-
-    const role = el.getAttribute('role');
-    if (role) node.role = role;
-
-    const ariaLabel = el.getAttribute('aria-label');
-    if (ariaLabel) node.ariaLabel = ariaLabel;
-
-    const text = (el.textContent || '').trim().slice(0, 120);
-    if (text) node.text = text;
-
-    if (el.shadowRoot) node.hasShadowRoot = true;
-    if (el.tagName === 'IFRAME') node.isIframe = true;
-
-    const childElements = Array.from(el.children || []);
-    const children = childElements
-      .map(child => extractNode(child, depth + 1))
-      .filter(Boolean);
-    if (children.length) node.children = children;
-
-    return node;
-  }
-
-  return Array.from(document.body ? document.body.children : [])
-    .map(child => extractNode(child, 1))
-    .filter(Boolean);
-`;
