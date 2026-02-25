@@ -1,5 +1,6 @@
 import fs from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 import { Builder, WebDriver, logging } from "selenium-webdriver";
 import chrome from "selenium-webdriver/chrome.js";
 import { AnalysisResult } from "./types.js";
@@ -53,9 +54,11 @@ export class SiteCrawler {
     await this.driver.get(url);
 
     // Read the pre-built browser bundle from disk and inject it into the page.
-    const bundlePath = path.resolve(process.cwd(), "build", "analyzer.browser.js");
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+    const bundlePath = path.resolve(__dirname, "analyzer.browser.js");
     const bundleSource = fs.readFileSync(bundlePath, "utf-8");
-    await this.driver.executeScript(bundleSource);
+    await this.driver.executeScript(bundleSource + "\nwindow.DomAnalyzerBundle = DomAnalyzerBundle;");
 
     // Run the analysis asynchronously inside the page.
     // Selenium passes the done-callback as the last element of `arguments`.

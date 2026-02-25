@@ -36,8 +36,8 @@ export class DomAnalyzer {
     if (typeof window === "undefined") {
       throw new Error("[analyzer] This module must run in a browser environment.");
     }
-    // Try WebNN → WebGPU in order of preference (browser-only execution providers).
-    for (const device of ["webnn", "webgpu"] as const) {
+    // Try WebNN → WebGPU → WASM (CPU) in order of preference.
+    for (const device of ["webnn", "webgpu", "wasm"] as const) {
       try {
         this.extractor = (await pipeline(
           "feature-extraction",
@@ -52,34 +52,26 @@ export class DomAnalyzer {
         );
       }
     }
-    throw new Error("[analyzer] Could not load model. A browser with WebNN or WebGPU support is required.");
+    console.warn("[analyzer] All ML backends unavailable — running in heuristic-only mode.");
   }
+}
 
-  /**
-   * Extract the current page's DOM, score elements, and return a prioritized
-   * list of test candidates. Must be called from inside a browser page.
-   */
-  async analyzeCurrentPage(): Promise<AnalysisResult> {
-    if (!this.extractor) {
-      throw new Error("DomAnalyzer is not initialized. Call init() first.");
-    }
+const dom = extractDom();
+const riskyElements: RiskyElement[] = [];
+this.collectRiskyElements(dom, "", riskyElements);
 
-    const dom = extractDom();
-    const riskyElements: RiskyElement[] = [];
-    this.collectRiskyElements(dom, "", riskyElements);
+const priorityTestList: TestCandidate[] = await this.buildTestCandidates(
+  riskyElements
+);
 
-    const priorityTestList: TestCandidate[] = await this.buildTestCandidates(
-      riskyElements
-    );
-
-    return {
-      url: window.location.href,
-      title: document.title,
-      riskyElements,
-      priorityTestList,
-      // Console logs are captured by Selenium on the Node side; empty here.
-      consoleLogs: [],
-    };
+return {
+  url: window.location.href,
+  title: document.title,
+  riskyElements,
+  priorityTestList,
+  // Console logs are captured by Selenium on the Node side; empty here.
+  consoleLogs: [],
+};
   }
 
   // -------------------------------------------------------------------------
@@ -87,102 +79,121 @@ export class DomAnalyzer {
   // -------------------------------------------------------------------------
 
   private collectRiskyElements(
-    elements: DomElement[],
-    parentPath: string,
-    out: RiskyElement[]
-  ): void {
-    for (const el of elements) {
-      const path = buildPath(el, parentPath);
-      const reasons: string[] = [];
-      let riskScore = 0;
+  elements: DomElement[],
+  parentPath: string,
+  out: RiskyElement[]
+): void {
+  for(const el of elements) {
+    const path = buildPath(el, parentPath);
+    const reasons: string[] = [];
+    let riskScore = 0;
 
-      // No unique ID → harder to locate reliably
-      if (!el.id) {
-        reasons.push("No unique ID");
-        riskScore += 20;
-      }
+    // No unique ID → harder to locate reliably
+    if (!el.id) {
+      reasons.push("No unique ID");
+      riskScore += 20;
+    }
 
-      // Shadow DOM increases test complexity
-      if (el.hasShadowRoot) {
-        reasons.push("Shadow root present");
-        riskScore += 40;
-      }
+    // Shadow DOM increases test complexity
+    if (el.hasShadowRoot) {
+      reasons.push("Shadow root present");
+      riskScore += 40;
+    }
 
-      // Embedded iframes are notoriously brittle
-      if (el.isIframe) {
-        reasons.push("Iframe element");
-        riskScore += 30;
-      }
+    // Embedded iframes are notoriously brittle
+    if (el.isIframe) {
+      reasons.push("Iframe element");
+      riskScore += 30;
+    }
 
-      // Interactive elements without accessible labels are fragile
-      const interactiveTags = new Set([
-        "button",
-        "input",
-        "select",
-        "textarea",
-        "a",
-      ]);
-      if (interactiveTags.has(el.tag) && !el.id && !el.ariaLabel) {
-        reasons.push("Interactive element with no ID or aria-label");
-        riskScore += 25;
-      }
+    // Interactive elements without accessible labels are fragile
+    const interactiveTags = new Set([
+      "button",
+      "input",
+      "select",
+      "textarea",
+      "a",
+    ]);
+    if (interactiveTags.has(el.tag) && !el.id && !el.ariaLabel) {
+      reasons.push("Interactive element with no ID or aria-label");
+      riskScore += 25;
+    }
 
-      if (reasons.length > 0) {
-        out.push({
-          path,
-          tag: el.tag,
-          id: el.id,
-          classes: el.classes,
-          reason: reasons.join("; "),
-          riskScore,
-        });
-      }
+    if (reasons.length > 0) {
+      out.push({
+        path,
+        tag: el.tag,
+        id: el.id,
+        classes: el.classes,
+        reason: reasons.join("; "),
+        riskScore,
+      });
+    }
 
-      if (el.children?.length) {
-        this.collectRiskyElements(el.children, path, out);
-      }
+    if (el.children?.length) {
+      this.collectRiskyElements(el.children, path, out);
     }
   }
+}
 
   private async buildTestCandidates(
-    riskyElements: RiskyElement[]
-  ): Promise<TestCandidate[]> {
-    if (!this.extractor || riskyElements.length === 0) return [];
+  riskyElements: RiskyElement[]
+): Promise < TestCandidate[] > {
+  if(riskyElements.length === 0) return [];
 
-    // Use the model to embed element descriptions so we can de-duplicate
-    // near-identical elements and surface the most unique ones.
-    const descriptions = riskyElements.map((el) => elementDescription(el));
+  const descriptions = riskyElements.map((el) => elementDescription(el));
 
-    const embeddings: number[][] = [];
-    for (const desc of descriptions) {
-      const output = await this.extractor(desc, {
-        pooling: "mean",
-        normalize: true,
-      });
-      // output.data is a Float32Array; convert to plain number[]
-      embeddings.push(Array.from(output.data as Float32Array));
-    }
+  // If no ML model is available, deduplicate by exact description string.
+  if(!this.extractor) {
+  const seen = new Set<string>();
+  return riskyElements
+    .filter((_, i) => {
+      if (seen.has(descriptions[i])) return false;
+      seen.add(descriptions[i]);
+      return true;
+    })
+    .map((el, i) => ({
+      description: descriptions[i],
+      locator: buildLocator(el),
+      riskScore: el.riskScore,
+    }))
+    .sort((a, b) => b.riskScore - a.riskScore);
+}
 
-    // Greedy de-duplication: keep elements whose embedding is not too close
-    // to an already-selected element (cosine similarity < 0.92).
-    const selected: number[] = [];
-    for (let i = 0; i < embeddings.length; i++) {
-      const isTooSimilar = selected.some((j) => {
-        return cosineSimilarity(embeddings[i], embeddings[j]) > 0.92;
-      });
-      if (!isTooSimilar) selected.push(i);
-    }
+// Use the model to embed element descriptions so we can de-duplicate
+// near-identical elements and surface the most unique ones.
+const descriptions = riskyElements.map((el) => elementDescription(el));
 
-    return selected
-      .map((i) => {
-        const el = riskyElements[i];
-        return {
-          description: descriptions[i],
-          locator: buildLocator(el),
-          riskScore: el.riskScore,
-        };
-      })
-      .sort((a, b) => b.riskScore - a.riskScore);
+const embeddings: number[][] = [];
+for (const desc of descriptions) {
+  const output = await this.extractor(desc, {
+    pooling: "mean",
+    normalize: true,
+  });
+  // output.data is a Float32Array; convert to plain number[]
+  embeddings.push(Array.from(output.data as Float32Array));
+}
+
+// Greedy de-duplication: keep elements whose embedding is not too close
+// to an already-selected element (cosine similarity < 0.92).
+const selected: number[] = [];
+for (let i = 0; i < embeddings.length; i++) {
+  const isTooSimilar = selected.some((j) => {
+    return cosineSimilarity(embeddings[i], embeddings[j]) > 0.92;
+  });
+  if (!isTooSimilar) selected.push(i);
+}
+
+return selected
+  .map((i) => {
+    const el = riskyElements[i];
+    return {
+      description: descriptions[i],
+      locator: buildLocator(el),
+      riskScore: el.riskScore,
+    };
+  })
+  .sort((a, b) => b.riskScore - a.riskScore);
   }
 }
 
