@@ -1,5 +1,6 @@
 import { pipeline, FeatureExtractionPipeline } from "@huggingface/transformers";
 import { AnalysisResult, HighIntentElement } from "./types.js";
+import { TestCaseGenerator } from "./test-case-generator.js";
 
 // ---------------------------------------------------------------------------
 // DOM types (defined here — this module is browser-only)
@@ -97,10 +98,15 @@ export class DomAnalyzer {
       }
     }
     deduped.sort((a, b) => b.intentScore - a.intentScore);
+
+    // Generate test cases from high-intent elements
+    const testCases = TestCaseGenerator.generate(deduped, document.title);
+
     return {
       url: window.location.href,
       title: document.title,
       highIntentElements: deduped,
+      generatedTestCases: testCases,
       consoleLogs: []
     };
   }
@@ -235,6 +241,7 @@ export class DomAnalyzer {
           intentScore,
           navigates,
           navigationTarget,
+          attributes: el.attributes,
         });
       }
 

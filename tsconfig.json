@@ -20,6 +20,8 @@
   "include": [
     "src/types.ts",
     "src/crawler.ts",
+    "src/test-case-generator.ts",
+    "src/markdown-exporter.ts",
     "src/index.ts"
   ],
   "exclude": [

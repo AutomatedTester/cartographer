@@ -19,6 +19,7 @@ import { z } from "zod";
 
 import { SiteCrawler } from "./crawler.js";
 import { AnalysisResult, HighIntentElement } from "./types.js";
+import { MarkdownExporter } from "./markdown-exporter.js";
 
 // ---------------------------------------------------------------------------
 // Shared singletons (initialised once)
@@ -35,6 +36,7 @@ let lastAnalysis: AnalysisResult | null = null;
 
 const CrawlAndAnalyzeInput = z.object({
   url: z.string().url({ message: "A valid URL is required." }),
+  format: z.enum(["json", "markdown", "markdown-summary"]).optional().default("markdown"),
 });
 
 const GetElementLocatorInput = z.object({
@@ -58,13 +60,19 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "crawl_and_analyze",
       description:
-        "Crawl a web page with Selenium and use a local ML model to identify brittle elements and generate a prioritized list of test candidates.",
+        "Crawl a web page with Selenium and use a local ML model to identify brittle elements and auto-generate test cases.",
       inputSchema: {
         type: "object" as const,
         properties: {
           url: {
             type: "string",
             description: "The fully-qualified URL to crawl (e.g. https://example.com).",
+          },
+          format: {
+            type: "string",
+            enum: ["json", "markdown", "markdown-summary"],
+            description: "Output format: 'json' for structured data, 'markdown' for full report with test cases, 'markdown-summary' for concise list",
+            default: "markdown",
           },
         },
         required: ["url"],
@@ -93,7 +101,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   if (name === "crawl_and_analyze") {
-    const { url } = CrawlAndAnalyzeInput.parse(args);
+    const { url, format } = CrawlAndAnalyzeInput.parse(args);
 
     try {
       await crawler.init();
@@ -102,11 +110,24 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       await crawler.close();
     }
 
+    // Format output based on user preference
+    let output: string;
+    if (format === "json") {
+      output = JSON.stringify(lastAnalysis, null, 2);
+    } else if (format === "markdown-summary") {
+      output = lastAnalysis.generatedTestCases
+        ? MarkdownExporter.exportTestCasesList(lastAnalysis.generatedTestCases)
+        : "No test cases generated";
+    } else {
+      // Default to "markdown" - full report
+      output = MarkdownExporter.exportFull(lastAnalysis);
+    }
+
     return {
       content: [
         {
           type: "text" as const,
-          text: JSON.stringify(lastAnalysis, null, 2),
+          text: output,
         },
       ],
     };
