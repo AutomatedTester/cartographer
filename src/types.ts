@@ -5,17 +5,26 @@
  * tsconfig.browser.json (browser).
  */
 
-/** A single element flagged as a testing risk. */
-export interface RiskyElement {
+
+/** A single element identified as high intent for user interaction. */
+export interface HighIntentElement {
     /** CSS-like path describing the element's location. */
     path: string;
     tag: string;
     id?: string;
     classes?: string[];
-    /** Human-readable explanation of why this element is flagged. */
-    reason: string;
-    /** Higher value = higher priority for test coverage. */
-    riskScore: number;
+    role?: string;
+    ariaLabel?: string;
+    text?: string;
+    locator: string;
+    /** Human-readable explanation of why this element is high intent. */
+    intentReasons: string[];
+    /** Higher value = higher priority for user intent. */
+    intentScore: number;
+    /** True if this element likely triggers navigation. */
+    navigates?: boolean;
+    /** Target of navigation if applicable (e.g., href, action). */
+    navigationTarget?: string;
 }
 
 /** A candidate test case derived from a page snapshot. */
@@ -30,7 +39,6 @@ export interface TestCandidate {
 export interface AnalysisResult {
     url: string;
     title: string;
-    riskyElements: RiskyElement[];
-    priorityTestList: TestCandidate[];
+    highIntentElements: HighIntentElement[];
     consoleLogs: string[];
 }

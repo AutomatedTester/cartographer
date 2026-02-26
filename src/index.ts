@@ -18,7 +18,7 @@ import {
 import { z } from "zod";
 
 import { SiteCrawler } from "./crawler.js";
-import { AnalysisResult, TestCandidate } from "./types.js";
+import { AnalysisResult, HighIntentElement } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // Shared singletons (initialised once)
@@ -127,7 +127,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    const best = findBestCandidate(lastAnalysis.priorityTestList, description);
+    // Use highIntentElements instead of priorityTestList
+    const best = findBestCandidate(
+      lastAnalysis.highIntentElements ?? [],
+      description
+    );
     return {
       content: [
         {
@@ -152,21 +156,33 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
 /**
  * Simple keyword-overlap heuristic to match a natural-language description
- * to a test candidate without requiring an extra model call.
+ * to a high-intent element without requiring an extra model call.
  */
 function findBestCandidate(
-  candidates: TestCandidate[],
+  candidates: HighIntentElement[],
   description: string
-): TestCandidate | null {
+): HighIntentElement | null {
   if (candidates.length === 0) return null;
 
   const queryTokens = tokenize(description);
 
   let bestScore = -1;
-  let best: TestCandidate | null = null;
+  let best: HighIntentElement | null = null;
 
   for (const candidate of candidates) {
-    const candidateTokens = tokenize(candidate.description);
+    // Build a searchable string from element attributes
+    const candidateText = [
+      candidate.tag,
+      candidate.id,
+      candidate.classes?.join(" "),
+      candidate.ariaLabel,
+      candidate.text,
+      candidate.role,
+      candidate.intentReasons?.join(" "),
+    ]
+      .filter(Boolean)
+      .join(" ");
+    const candidateTokens = tokenize(candidateText);
     const overlap = queryTokens.filter((t) => candidateTokens.includes(t))
       .length;
     const score = overlap / (queryTokens.length + 1);

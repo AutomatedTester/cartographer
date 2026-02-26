@@ -1,5 +1,5 @@
 import { pipeline, FeatureExtractionPipeline } from "@huggingface/transformers";
-import { AnalysisResult, RiskyElement, TestCandidate } from "./types.js";
+import { AnalysisResult, HighIntentElement } from "./types.js";
 
 // ---------------------------------------------------------------------------
 // DOM types (defined here — this module is browser-only)
@@ -14,10 +14,12 @@ export interface DomElement {
   text?: string;
   hasShadowRoot?: boolean;
   isIframe?: boolean;
+  attributes?: Record<string, string>;
+  isVisible?: boolean;
   children?: DomElement[];
 }
 
-export { AnalysisResult, RiskyElement, TestCandidate } from "./types.js";
+export { AnalysisResult, HighIntentElement } from "./types.js";
 
 /**
  * DomAnalyzer uses a local Transformers.js model (feature-extraction /
@@ -54,150 +56,196 @@ export class DomAnalyzer {
     }
     console.warn("[analyzer] All ML backends unavailable — running in heuristic-only mode.");
   }
-}
 
-const dom = extractDom();
-const riskyElements: RiskyElement[] = [];
-this.collectRiskyElements(dom, "", riskyElements);
+  async analyzeCurrentPage(intentThreshold: number = 25): Promise<AnalysisResult> {
+    const dom = extractDom(10);
+    const highIntentElements: HighIntentElement[] = [];
+    this.collectHighIntentElements(dom, "", highIntentElements, intentThreshold);
 
-const priorityTestList: TestCandidate[] = await this.buildTestCandidates(
-  riskyElements
-);
-
-return {
-  url: window.location.href,
-  title: document.title,
-  riskyElements,
-  priorityTestList,
-  // Console logs are captured by Selenium on the Node side; empty here.
-  consoleLogs: [],
-};
+    // ML deduplication (if model available) or fallback to description dedup
+    let deduped: HighIntentElement[] = [];
+    if (!this.extractor) {
+      const seen = new Set<string>();
+      for (const el of highIntentElements) {
+        const desc = elementDescription(el);
+        if (!seen.has(desc)) {
+          deduped.push(el);
+          seen.add(desc);
+        }
+      }
+    } else {
+      // Use ML model to deduplicate by semantic similarity
+      const descriptions = highIntentElements.map((el) => elementDescription(el));
+      const embeddings: number[][] = [];
+      for (const desc of descriptions) {
+        // @ts-ignore: extractor returns Promise<number[][]>
+        const emb = await this.extractor(desc);
+        embeddings.push(Array.isArray(emb[0]) ? emb[0][0] : emb[0]);
+      }
+      const used = new Array(highIntentElements.length).fill(false);
+      const threshold = 0.92;
+      for (let i = 0; i < highIntentElements.length; ++i) {
+        if (used[i]) continue;
+        deduped.push(highIntentElements[i]);
+        used[i] = true;
+        for (let j = i + 1; j < highIntentElements.length; ++j) {
+          if (used[j]) continue;
+          if (cosineSimilarity(embeddings[i], embeddings[j]) > threshold) {
+            used[j] = true;
+          }
+        }
+      }
+    }
+    deduped.sort((a, b) => b.intentScore - a.intentScore);
+    return {
+      url: window.location.href,
+      title: document.title,
+      highIntentElements: deduped,
+      consoleLogs: []
+    };
   }
 
   // -------------------------------------------------------------------------
   // Private helpers
   // -------------------------------------------------------------------------
 
-  private collectRiskyElements(
-  elements: DomElement[],
-  parentPath: string,
-  out: RiskyElement[]
-): void {
-  for(const el of elements) {
-    const path = buildPath(el, parentPath);
-    const reasons: string[] = [];
-    let riskScore = 0;
+  private collectHighIntentElements(
+    elements: DomElement[],
+    parentPath: string,
+    out: HighIntentElement[],
+    intentThreshold: number
+  ): void {
+    for (const el of elements) {
+      const path = buildPath(el, parentPath);
+      const reasons: string[] = [];
+      let intentScore = 0;
 
-    // No unique ID → harder to locate reliably
-    if (!el.id) {
-      reasons.push("No unique ID");
-      riskScore += 20;
-    }
+      // Only consider visible elements
+      if (el.isVisible === false) continue;
 
-    // Shadow DOM increases test complexity
-    if (el.hasShadowRoot) {
-      reasons.push("Shadow root present");
-      riskScore += 40;
-    }
+      // Tag/role-based scoring
+      const tag = el.tag;
+      const role = el.role || "";
+      const type = el.attributes?.type || "";
+      const hasHref = !!el.attributes?.href;
+      const hasAction = !!el.attributes?.action;
 
-    // Embedded iframes are notoriously brittle
-    if (el.isIframe) {
-      reasons.push("Iframe element");
-      riskScore += 30;
-    }
+      // Base scores
+      if (tag === "button" || role === "button") {
+        intentScore += 30;
+        reasons.push("button or role=button");
+      }
+      if (tag === "a" && hasHref) {
+        intentScore += 25;
+        reasons.push("anchor with href");
+      }
+      if (tag === "input" && ["submit", "button", "reset"].includes(type)) {
+        intentScore += 30;
+        reasons.push("input type submit/button/reset");
+      }
+      if (tag === "input" && ["text", "search", "email", "password"].includes(type)) {
+        intentScore += 15;
+        reasons.push("input type text/search/email/password");
+      }
+      if (tag === "select") {
+        intentScore += 20;
+        reasons.push("select element");
+      }
+      if (tag === "textarea") {
+        intentScore += 15;
+        reasons.push("textarea");
+      }
+      if (["form", "nav", "details", "summary"].includes(tag)) {
+        intentScore += 10;
+        reasons.push("semantic container");
+      }
+      if (
+        ["button", "link", "menuitem", "tab", "checkbox", "radio", "combobox", "searchbox"].includes(role)
+      ) {
+        intentScore += 20;
+        reasons.push("ARIA interactive role");
+      }
 
-    // Interactive elements without accessible labels are fragile
-    const interactiveTags = new Set([
-      "button",
-      "input",
-      "select",
-      "textarea",
-      "a",
-    ]);
-    if (interactiveTags.has(el.tag) && !el.id && !el.ariaLabel) {
-      reasons.push("Interactive element with no ID or aria-label");
-      riskScore += 25;
-    }
+      // Positive signals
+      if (el.ariaLabel || el.text) {
+        intentScore += 15;
+        reasons.push("has label or text");
+      }
+      if (el.id) {
+        intentScore += 10;
+        reasons.push("has id");
+      }
+      if (parentPath.includes("form")) {
+        intentScore += 10;
+        reasons.push("inside form");
+      }
+      if (el.attributes?.tabindex && Number(el.attributes.tabindex) >= 0) {
+        intentScore += 5;
+        reasons.push("tabindex >= 0");
+      }
 
-    if (reasons.length > 0) {
-      out.push({
-        path,
-        tag: el.tag,
-        id: el.id,
-        classes: el.classes,
-        reason: reasons.join("; "),
-        riskScore,
-      });
-    }
+      // Negative signals
+      if (el.attributes?.disabled !== undefined) {
+        intentScore -= 50;
+        reasons.push("disabled");
+      }
+      if (el.attributes?.readonly !== undefined) {
+        intentScore -= 20;
+        reasons.push("readonly");
+      }
+      if (el.attributes?.hidden !== undefined || el.attributes?.["aria-hidden"] === "true") {
+        intentScore -= 50;
+        reasons.push("hidden");
+      }
+      if (type === "hidden") {
+        intentScore -= 50;
+        reasons.push("input type=hidden");
+      }
 
-    if (el.children?.length) {
-      this.collectRiskyElements(el.children, path, out);
+      // Navigation detection
+      let navigates = false;
+      let navigationTarget: string | undefined = undefined;
+      if (tag === "a" && hasHref && el.attributes?.href && !el.attributes.href.startsWith("#")) {
+        navigates = true;
+        navigationTarget = el.attributes.href;
+        reasons.push("anchor likely navigates");
+      }
+      if (tag === "form" && hasAction && el.attributes?.action) {
+        navigates = true;
+        navigationTarget = el.attributes.action;
+        reasons.push("form likely navigates");
+      }
+      if (tag === "button" && type === "submit" && parentPath.includes("form")) {
+        navigates = true;
+        reasons.push("submit button in form");
+      }
+
+      // Only include if above threshold
+      if (intentScore >= intentThreshold) {
+        out.push({
+          path,
+          tag,
+          id: el.id,
+          classes: el.classes,
+          role: el.role,
+          ariaLabel: el.ariaLabel,
+          text: el.text,
+          locator: buildLocator(el),
+          intentReasons: reasons,
+          intentScore,
+          navigates,
+          navigationTarget,
+        });
+      }
+
+      if (el.children?.length) {
+        this.collectHighIntentElements(el.children, path, out, intentThreshold);
+      }
     }
   }
 }
 
-  private async buildTestCandidates(
-  riskyElements: RiskyElement[]
-): Promise < TestCandidate[] > {
-  if(riskyElements.length === 0) return [];
-
-  const descriptions = riskyElements.map((el) => elementDescription(el));
-
-  // If no ML model is available, deduplicate by exact description string.
-  if(!this.extractor) {
-  const seen = new Set<string>();
-  return riskyElements
-    .filter((_, i) => {
-      if (seen.has(descriptions[i])) return false;
-      seen.add(descriptions[i]);
-      return true;
-    })
-    .map((el, i) => ({
-      description: descriptions[i],
-      locator: buildLocator(el),
-      riskScore: el.riskScore,
-    }))
-    .sort((a, b) => b.riskScore - a.riskScore);
-}
-
-// Use the model to embed element descriptions so we can de-duplicate
-// near-identical elements and surface the most unique ones.
-const descriptions = riskyElements.map((el) => elementDescription(el));
-
-const embeddings: number[][] = [];
-for (const desc of descriptions) {
-  const output = await this.extractor(desc, {
-    pooling: "mean",
-    normalize: true,
-  });
-  // output.data is a Float32Array; convert to plain number[]
-  embeddings.push(Array.from(output.data as Float32Array));
-}
-
-// Greedy de-duplication: keep elements whose embedding is not too close
-// to an already-selected element (cosine similarity < 0.92).
-const selected: number[] = [];
-for (let i = 0; i < embeddings.length; i++) {
-  const isTooSimilar = selected.some((j) => {
-    return cosineSimilarity(embeddings[i], embeddings[j]) > 0.92;
-  });
-  if (!isTooSimilar) selected.push(i);
-}
-
-return selected
-  .map((i) => {
-    const el = riskyElements[i];
-    return {
-      description: descriptions[i],
-      locator: buildLocator(el),
-      riskScore: el.riskScore,
-    };
-  })
-  .sort((a, b) => b.riskScore - a.riskScore);
-  }
-}
-
-// ---------------------------------------------------------------------------
+// -------------------------------------------------------------------------
 // Pure utility functions
 // ---------------------------------------------------------------------------
 
@@ -205,8 +253,7 @@ return selected
  * Walk document.body and return a simplified DomElement tree.
  * Mirrors the extractDomScript logic that previously lived in crawler.ts.
  */
-function extractDom(): DomElement[] {
-  const MAX_DEPTH = 5;
+function extractDom(maxDepth: number = 10): DomElement[] {
   const SKIP_TAGS = new Set([
     "SCRIPT",
     "STYLE",
@@ -217,7 +264,7 @@ function extractDom(): DomElement[] {
   ]);
 
   function extractNode(el: Element, depth: number): DomElement | null {
-    if (!el || depth > MAX_DEPTH) return null;
+    if (!el || depth > maxDepth) return null;
     if (SKIP_TAGS.has(el.tagName)) return null;
 
     const node: DomElement = { tag: el.tagName.toLowerCase() };
@@ -239,6 +286,35 @@ function extractDom(): DomElement[] {
     if ((el as HTMLElement & { shadowRoot: ShadowRoot | null }).shadowRoot)
       node.hasShadowRoot = true;
     if (el.tagName === "IFRAME") node.isIframe = true;
+
+    // Collect semantic attributes
+    const attrNames = [
+      "type",
+      "name",
+      "placeholder",
+      "title",
+      "href",
+      "action",
+      "tabindex",
+      "disabled",
+      "readonly",
+      "required",
+      "hidden",
+      "value",
+    ];
+    node.attributes = {};
+    for (const attr of attrNames) {
+      const val = el.getAttribute(attr);
+      if (val !== null) node.attributes[attr] = val;
+    }
+
+    // Visibility detection (best effort)
+    const style = window.getComputedStyle(el as Element);
+    node.isVisible =
+      style.display !== "none" &&
+      style.visibility !== "hidden" &&
+      el.getAttribute("hidden") === null &&
+      el.getAttribute("aria-hidden") !== "true";
 
     const children = Array.from(el.children)
       .map((child) => extractNode(child, depth + 1))
@@ -263,17 +339,19 @@ function buildPath(el: DomElement, parentPath: string): string {
   return parentPath ? `${parentPath} > ${segment}` : segment;
 }
 
-function buildLocator(el: RiskyElement): string {
+function buildLocator(el: HighIntentElement): string {
   if (el.id) return `#${el.id}`;
   if (el.classes?.length) return `${el.tag}.${el.classes.join(".")}`;
   return el.path;
 }
 
-function elementDescription(el: RiskyElement): string {
+function elementDescription(el: HighIntentElement): string {
   const parts: string[] = [el.tag];
   if (el.id) parts.push(`id="${el.id}"`);
   if (el.classes?.length) parts.push(`class="${el.classes.join(" ")}"`);
-  parts.push(el.reason);
+  if (el.ariaLabel) parts.push(`aria-label="${el.ariaLabel}"`);
+  if (el.text) parts.push(`text="${el.text}"`);
+  if (el.intentReasons?.length) parts.push(el.intentReasons.join("; "));
   return parts.join(" ");
 }
 

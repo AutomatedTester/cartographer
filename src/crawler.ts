@@ -16,10 +16,8 @@ export class SiteCrawler {
   async init(): Promise<void> {
     const options = new chrome.Options();
     options.addArguments(
-      "--headless=new",
       "--no-sandbox",
       "--disable-dev-shm-usage",
-      "--disable-gpu",
       "--log-level=3",
       // Allow injected scripts to bypass Content-Security-Policy headers
       "--disable-web-security"
@@ -43,7 +41,7 @@ export class SiteCrawler {
    * The async script timeout is raised to 120 s to account for model
    * download time on the first run.
    */
-  async crawlAndAnalyze(url: string): Promise<AnalysisResult> {
+  async crawlAndAnalyze(url: string, intentThreshold: number = 25): Promise<AnalysisResult> {
     if (!this.driver) {
       throw new Error("SiteCrawler is not initialized. Call init() first.");
     }
@@ -62,19 +60,23 @@ export class SiteCrawler {
 
     // Run the analysis asynchronously inside the page.
     // Selenium passes the done-callback as the last element of `arguments`.
-    const result = await this.driver.executeAsyncScript<AnalysisResult>(`
+    const result = await this.driver.executeAsyncScript<AnalysisResult>(
+      `
       const callback = arguments[arguments.length - 1];
+      const intentThreshold = arguments[0];
       (async () => {
         try {
           const analyzer = new window.DomAnalyzerBundle.DomAnalyzer();
           await analyzer.init();
-          const result = await analyzer.analyzeCurrentPage();
+          const result = await analyzer.analyzeCurrentPage(intentThreshold);
           callback(result);
         } catch (err) {
           callback({ error: err instanceof Error ? err.message : String(err) });
         }
       })();
-    `);
+    `,
+      intentThreshold
+    );
 
     // Collect browser console logs and attach them to the result.
     const rawLogs = await this.driver.manage().logs().get(logging.Type.BROWSER);
