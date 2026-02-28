@@ -4,6 +4,7 @@ import { fileURLToPath } from "url";
 import { Builder, WebDriver, logging } from "selenium-webdriver";
 import chrome from "selenium-webdriver/chrome.js";
 import { AnalysisResult } from "./types.js";
+import { SemanticHandlerGenerator } from "./webmcp-semantic-handlers.js";
 
 /**
  * SiteCrawler uses a headless Chrome instance managed by Selenium Manager
@@ -77,6 +78,18 @@ export class SiteCrawler {
     `,
       intentThreshold
     );
+
+    // Inject semantic webmcp tool handlers for the discovered high-intent elements
+    if (result.highIntentElements && result.highIntentElements.length > 0) {
+      const handlerCode = SemanticHandlerGenerator.generateHandlerCode(result.highIntentElements);
+      await this.driver.executeScript(handlerCode);
+
+      // Log which tools were registered
+      const registeredTools = await this.driver.executeScript<string[]>(
+        `return navigator.webmcp?.registeredTools || [];`
+      );
+      console.log(`[crawler] Registered ${registeredTools.length} semantic tools:`, registeredTools);
+    }
 
     // Collect browser console logs and attach them to the result.
     const rawLogs = await this.driver.manage().logs().get(logging.Type.BROWSER);

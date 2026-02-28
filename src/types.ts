@@ -40,6 +40,20 @@ export interface TestCandidate {
 /** Priority level for test case ordering */
 export type TestPriority = 'critical' | 'high' | 'medium' | 'low';
 
+/** A semantic webmcp tool definition */
+export interface SemanticToolSchema {
+    /** Tool name in camelCase (e.g., "search", "subscribeToNewsletter") */
+    name: string;
+    /** Human-readable description of what the tool does */
+    description: string;
+    /** Type of action the tool performs */
+    actionType: 'click' | 'input' | 'submit' | 'navigate' | 'delete' | 'select' | 'hover';
+    /** Input schema for the tool (e.g., optional query parameter) */
+    inputSchema: Record<string, unknown>;
+    /** Return type documentation */
+    returnType: string;
+}
+
 /** A generated test case from a high-intent element */
 export interface GeneratedTestCase {
     /** Unique identifier for the test case */
@@ -66,6 +80,10 @@ export interface GeneratedTestCase {
     tags: string[];
     /** Associated element that generated this test */
     sourceElement: HighIntentElement;
+    /** Reference to the semantic webmcp tool this test calls */
+    semanticTool?: string;
+    /** Executable test code that calls the semantic tool */
+    testCode?: string;
 }
 
 /** Full output produced by the analyzer. */
@@ -76,3 +94,31 @@ export interface AnalysisResult {
     generatedTestCases?: GeneratedTestCase[];
     consoleLogs: string[];
 }
+
+/** Result of executing a single test */
+export interface TestExecutionResult {
+    /** Test case ID */
+    testId: string;
+    /** Tool name that was executed */
+    toolName: string;
+    /** Whether the test passed */
+    success: boolean;
+    /** Result message */
+    message: string;
+    /** Execution duration in milliseconds */
+    duration: number;
+    /** Error details if test failed */
+    error?: string;
+}
+
+/** Aggregated test execution results */
+export interface TestExecutionSummary {
+    url: string;
+    totalTests: number;
+    passedTests: number;
+    failedTests: number;
+    results: TestExecutionResult[];
+    totalDuration: number;
+    semanticTools: SemanticToolSchema[];
+}
+

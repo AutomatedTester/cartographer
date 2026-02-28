@@ -1,6 +1,6 @@
 # Auto-Generated Test Case Implementation Summary
 
-**Date:** February 26, 2026  
+**Date:** February 26, 2026
 **Status:** ✅ Complete
 
 ---
@@ -36,7 +36,7 @@ New class `TestCaseGenerator` that:
 
 - **Converts intent scores to priorities** - Scoring logic:
   - `critical`: score ≥ 50
-  - `high`: score ≥ 40  
+  - `high`: score ≥ 40
   - `medium`: score ≥ 30
   - `low`: score < 30
 
@@ -71,6 +71,7 @@ New class `TestCaseGenerator` that:
 New class `MarkdownExporter` with multiple export formats:
 
 #### Full Report (`exportFull()`)
+
 - Header with URL and timestamp
 - Executive summary with statistics
 - Test cases grouped by priority with emoji indicators (🔴🟠🟡🟢)
@@ -78,6 +79,7 @@ New class `MarkdownExporter` with multiple export formats:
 - Score distribution statistics
 
 #### Test Cases List (`exportTestCases()`)
+
 - Complete test case details:
   - Name and description
   - Pre-conditions
@@ -86,6 +88,7 @@ New class `MarkdownExporter` with multiple export formats:
   - Tags
 
 #### Summary Only (`exportTestCasesList()`)
+
 - Concise quick-reference format:
   - Test name
   - Locator
@@ -107,6 +110,7 @@ New class `MarkdownExporter` with multiple export formats:
 Updated the `crawl_and_analyze` tool to support multiple output formats:
 
 **New parameter:** `format`
+
 - `"json"` - Raw structured data (default for programmatic use)
 - `"markdown"` - Full report with all test cases and element details
 - `"markdown-summary"` - Quick-reference test case list
@@ -146,7 +150,9 @@ Updated the `crawl_and_analyze` tool to support multiple output formats:
 ## Test Case Generation Examples
 
 ### Example 1: Button Element
+
 **Input:** Button with aria-label="delete", score 55
+
 ```
 Test Case: Verify delete/remove action can be triggered
 Priority: CRITICAL (score 55)
@@ -169,7 +175,9 @@ Expected Results:
 ```
 
 ### Example 2: Navigation Link
+
 **Input:** Anchor tag with href="/offers", text="Offers", score 50
+
 ```
 Test Case: Verify navigation via "Offers" link
 Priority: CRITICAL (score 50)
@@ -187,7 +195,9 @@ Expected Results:
 ```
 
 ### Example 3: Form Input
+
 **Input:** Email input field, id="newsletter-email", score 35
+
 ```
 Test Case: Verify email input field accepts user input
 Priority: MEDIUM (score 35)
@@ -210,16 +220,19 @@ Expected Results:
 ## Files Created/Modified
 
 ### New Files
+
 - `src/test-case-generator.ts` - Test case generation logic
 - `src/markdown-exporter.ts` - Markdown formatting utilities
 
 ### Modified Files
+
 - `src/types.ts` - Added new interfaces (TestPriority, GeneratedTestCase)
 - `src/analyzer.ts` - Integrated TestCaseGenerator into analysis pipeline
 - `src/index.ts` - Enhanced MCP tool with format options
 - `tsconfig.json` - Updated file includes for new modules
 
 ### Compiled Output
+
 - `build/test-case-generator.js` + `.d.ts` - Compiled module
 - `build/markdown-exporter.js` + `.d.ts` - Compiled module
 - Updated `build/analyzer.browser.js` - Browser bundle with TestCaseGenerator
@@ -230,6 +243,7 @@ Expected Results:
 ## Usage Examples
 
 ### Get Full Report with Test Cases
+
 ```bash
 curl -X POST http://localhost:3000/api/crawl_and_analyze \
   -d '{"url": "https://example.com", "format": "markdown"}'
@@ -238,6 +252,7 @@ curl -X POST http://localhost:3000/api/crawl_and_analyze \
 Output: Complete markdown report with all test cases grouped by priority
 
 ### Get Quick Summary
+
 ```bash
 curl -X POST http://localhost:3000/api/crawl_and_analyze \
   -d '{"url": "https://example.com", "format": "markdown-summary"}'
@@ -246,6 +261,7 @@ curl -X POST http://localhost:3000/api/crawl_and_analyze \
 Output: Compact list of test cases with locators and scores
 
 ### Get Structured Data (for integration)
+
 ```bash
 curl -X POST http://localhost:3000/api/crawl_and_analyze \
   -d '{"url": "https://example.com", "format": "json"}'
@@ -257,17 +273,18 @@ Output: JSON array of `GeneratedTestCase` objects
 
 ## Key Features
 
-✅ **Automatic Priority Assignment** - Tests ordered by intent score  
-✅ **Action-Type Awareness** - Different templates for buttons, inputs, forms, etc.  
-✅ **Customizable Output** - JSON, full markdown, or summary  
+✅ **Automatic Priority Assignment** - Tests ordered by intent score
+✅ **Action-Type Awareness** - Different templates for buttons, inputs, forms, etc.
+✅ **Customizable Output** - JSON, full markdown, or summary
 ✅ **Ready for Extension** - Users can:
+
 - Customize test assertions
 - Add additional steps
 - Integrate with test frameworks
 - Add custom preconditions
 
-✅ **Stable Locators** - Uses CSS selectors, IDs, and element paths  
-✅ **Semantic Tags** - Automated categorization for filtering  
+✅ **Stable Locators** - Uses CSS selectors, IDs, and element paths
+✅ **Semantic Tags** - Automated categorization for filtering
 ✅ **Element Traceability** - Each test case links back to source element
 
 ---
@@ -275,14 +292,18 @@ Output: JSON array of `GeneratedTestCase` objects
 ## Integration Points
 
 ### For Test Frameworks
+
 Test cases can easily be integrated into:
+
 - **Playwright/Puppeteer** - Use locators directly with `.locator()`
 - **Cypress** - Convert to `.get()` and `.click()` chains
 - **Selenium** - Use locators with WebDriverWait
 - **Jest/Mocha** - Structure as test suites using names and descriptions
 
 ### For CI/CD
+
 Generated tests can be:
+
 1. Saved as JSON and loaded by test runners
 2. Exported to markdown for documentation
 3. Filtered by priority for smoke/regression test tiers

@@ -1,8 +1,10 @@
 import { HighIntentElement, GeneratedTestCase, TestPriority } from "./types.js";
+import { SemanticToolGenerator } from "./webmcp-semantic-tools.js";
 
 /**
  * TestCaseGenerator creates structured test cases from high-intent DOM elements.
  * Generates context-aware test steps based on element type and attributes.
+ * Now includes semantic webmcp tool references for browser-side execution.
  */
 export class TestCaseGenerator {
     /**
@@ -110,6 +112,15 @@ export class TestCaseGenerator {
 
         const tags = this.generateTags(el, actionType);
 
+        // Generate semantic tool reference and test code for critical tests
+        let semanticTool: string | undefined;
+        let testCode: string | undefined;
+        
+        if (priority === "critical") {
+            semanticTool = SemanticToolGenerator.generateToolName(el);
+            testCode = this.generateTestCode(semanticTool);
+        }
+
         return {
             id,
             name,
@@ -123,6 +134,8 @@ export class TestCaseGenerator {
             intentScore: el.intentScore,
             tags,
             sourceElement: el,
+            semanticTool,
+            testCode,
         };
     }
 
@@ -336,5 +349,18 @@ export class TestCaseGenerator {
         if (el.attributes?.type) tags.add(`input:${el.attributes.type}`);
 
         return Array.from(tags);
+    }
+
+    /**
+     * Generate executable test code that calls a semantic webmcp tool
+     */
+    private static generateTestCode(toolName: string): string {
+        return `
+async function test() {
+  const result = await navigator.webmcp.tools.${toolName}();
+  if (!result.success) throw new Error(result.message);
+  return { success: true, message: "Test passed", duration: result.duration };
+}
+`.trim();
     }
 }
