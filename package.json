@@ -9,7 +9,10 @@
     "build:browser": "esbuild src/analyzer.ts --bundle --format=iife --global-name=DomAnalyzerBundle --platform=browser --target=es2020 --outfile=build/analyzer.browser.js",
     "start": "npm run build && npm run build:browser && node build/index.js",
     "dev": "tsx src/index.ts",
-    "prepublishOnly": "npm run build && npm run build:browser"
+    "prepublishOnly": "npm run build && npm run build:browser",
+    "test": "npm run test:semantic",
+    "test:semantic": "node test/test-semantic-tools.js",
+    "test:mcp": "timeout 30 node test/test-mcp-client.js || true"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.0.0",
