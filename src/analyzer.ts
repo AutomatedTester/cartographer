@@ -99,6 +99,22 @@ export class DomAnalyzer {
     }
     deduped.sort((a, b) => b.intentScore - a.intentScore);
 
+    // Extract all navigation links for fallback crawling
+    const allNavLinks = new Set<string>();
+    const allElements = document.querySelectorAll('a[href], form[action], [onclick]');
+    for (const el of allElements) {
+      let href: string | undefined;
+      if (el.tagName === 'A') {
+        href = (el as HTMLAnchorElement).href;
+        if (href && !href.startsWith('#') && href !== window.location.href) {
+          allNavLinks.add(href);
+        }
+      } else if (el.tagName === 'FORM') {
+        href = (el as HTMLFormElement).action;
+        if (href) allNavLinks.add(href);
+      }
+    }
+
     // Generate test cases from high-intent elements
     const testCases = TestCaseGenerator.generate(deduped, document.title);
 
@@ -107,7 +123,8 @@ export class DomAnalyzer {
       title: document.title,
       highIntentElements: deduped,
       generatedTestCases: testCases,
-      consoleLogs: []
+      consoleLogs: [],
+      allNavigationLinks: Array.from(allNavLinks)
     };
   }
 
@@ -214,15 +231,18 @@ export class DomAnalyzer {
       if (tag === "a" && hasHref && el.attributes?.href && !el.attributes.href.startsWith("#")) {
         navigates = true;
         navigationTarget = el.attributes.href;
+        intentScore += 30; // Boost score for navigation links
         reasons.push("anchor likely navigates");
       }
       if (tag === "form" && hasAction && el.attributes?.action) {
         navigates = true;
         navigationTarget = el.attributes.action;
+        intentScore += 25; // Boost score for forms
         reasons.push("form likely navigates");
       }
       if (tag === "button" && type === "submit" && parentPath.includes("form")) {
         navigates = true;
+        intentScore += 20; // Boost score for submit buttons
         reasons.push("submit button in form");
       }
 

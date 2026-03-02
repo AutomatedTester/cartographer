@@ -18,10 +18,30 @@ import {
 import { z } from "zod";
 
 import { SiteCrawler } from "./crawler.js";
-import { AnalysisResult, HighIntentElement, TestExecutionSummary } from "./types.js";
+import { AnalysisResult, HighIntentElement, TestExecutionSummary, MultiPageCrawlResult, DetectedWorkflow, CrawlSession } from "./types.js";
 import { MarkdownExporter } from "./markdown-exporter.js";
 import { TestExecutor } from "./test-executor.js";
 import { SemanticToolGenerator } from "./webmcp-semantic-tools.js";
+import { MultiPageCrawler } from "./multi-page-crawler.js";
+import { SessionManager } from "./session-manager.js";
+import { WorkflowDetector } from "./workflow-detector.js"
+
+// ---------------------------------------------------------------------------
+// Helper Functions
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize URLs by adding protocol if missing
+ * www.example.com → https://www.example.com
+ */
+function normalizeUrl(url: string): string {
+  if (!url) return url;
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return url;
+  }
+  // Add https:// for URLs without protocol
+  return `https://${url}`;
+}
 
 // ---------------------------------------------------------------------------
 // Shared singletons (initialised once)
@@ -31,6 +51,9 @@ const crawler = new SiteCrawler();
 
 /** Most-recent analysis result, used by get_element_locator. */
 let lastAnalysis: AnalysisResult | null = null;
+
+/** Session storage for multi-page crawls - maps sessionId to CrawlSession */
+const sessions = new Map<string, CrawlSession>();
 
 // ---------------------------------------------------------------------------
 // Input schemas (validated with Zod)
@@ -52,6 +75,26 @@ const RunCriticalTestsInput = z.object({
   testIds: z.array(z.string()).optional(),
   retryCount: z.number().int().min(0).default(0).optional(),
   format: z.enum(["json", "markdown"]).optional().default("json"),
+});
+
+const CrawlMultiPageInput = z.object({
+  startUrl: z.string().transform((url) => normalizeUrl(url)).pipe(z.string().url({ message: "A valid URL is required." })),
+  maxPages: z.number().int().min(2).max(50).optional().default(10),
+  maxDepth: z.number().int().min(1).max(5).optional().default(3),
+  detectWorkflows: z.boolean().optional().default(true),
+  workflowStrategy: z.enum(["heuristic", "ml-based", "both"]).optional().default("both"),
+  format: z.enum(["json", "markdown"]).optional().default("json"),
+});
+
+const GetWorkflowByNameInput = z.object({
+  sessionId: z.string().min(1, { message: "Session ID is required." }),
+  workflowName: z.string().min(1, { message: "Workflow name is required." }),
+});
+
+const ExportWorkflowVisualizationInput = z.object({
+  sessionId: z.string().min(1, { message: "Session ID is required." }),
+  workflowIds: z.array(z.string()).optional(),
+  format: z.enum(["individual", "comparison", "full"]).optional().default("full"),
 });
 
 // ---------------------------------------------------------------------------
@@ -131,6 +174,97 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
         },
         required: ["url"],
+      },
+    },
+    {
+      name: "crawl_multi_page",
+      description:
+        "Crawl multiple pages of a website starting from a URL, detect user workflows (e.g., checkout, registration, login flows), and return a complete session with discovered workflows.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          startUrl: {
+            type: "string",
+            description: "The fully-qualified starting URL (e.g. https://example.com).",
+          },
+          maxPages: {
+            type: "number",
+            description: "Maximum number of pages to crawl (2-50, default: 10).",
+            default: 10,
+            minimum: 2,
+            maximum: 50,
+          },
+          maxDepth: {
+            type: "number",
+            description: "Maximum depth from start URL (1-5, default: 3).",
+            default: 3,
+            minimum: 1,
+            maximum: 5,
+          },
+          detectWorkflows: {
+            type: "boolean",
+            description: "Whether to detect workflows automatically (default: true).",
+            default: true,
+          },
+          workflowStrategy: {
+            type: "string",
+            enum: ["heuristic", "ml-based", "both"],
+            description: "Workflow detection strategy: 'heuristic' (pattern-based), 'ml-based' (semantic), or 'both' (default: both).",
+            default: "both",
+          },
+          format: {
+            type: "string",
+            enum: ["json", "markdown"],
+            description: "Output format: 'json' for structured data or 'markdown' for readable report (default: json).",
+            default: "json",
+          },
+        },
+        required: ["startUrl"],
+      },
+    },
+    {
+      name: "get_workflow_by_name",
+      description:
+        "Retrieve a specific detected workflow by name from a completed multi-page crawl session.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          sessionId: {
+            type: "string",
+            description: "The session ID returned from crawl_multi_page tool.",
+          },
+          workflowName: {
+            type: "string",
+            description: "Name of the workflow to retrieve (e.g., 'checkout_flow', 'login_flow', 'product_browsing_flow').",
+          },
+        },
+        required: ["sessionId", "workflowName"],
+      },
+    },
+    {
+      name: "export_workflow_visualization",
+      description:
+        "Export detected workflows from a multi-page crawl session as readable markdown visualizations showing page sequences, actions, and flow diagrams.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          sessionId: {
+            type: "string",
+            description: "The session ID returned from crawl_multi_page tool.",
+          },
+          workflowIds: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional. Specific workflow IDs to export. If omitted, all workflows are exported.",
+          },
+          format: {
+            type: "string",
+            enum: ["individual", "comparison", "full"],
+            description: "Export format: 'individual' (one workflow each), 'comparison' (multi-workflow analysis), or 'full' (complete report).",
+            default: "full",
+          },
+        },
+        required: ["sessionId"],
       },
     },
   ],
@@ -283,6 +417,148 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     };
   }
 
+  if (name === "crawl_multi_page") {
+    const { startUrl, maxPages, maxDepth, detectWorkflows, workflowStrategy, format } = CrawlMultiPageInput.parse(args);
+
+    try {
+      const crawler = new MultiPageCrawler({
+        startUrl,
+        maxPages,
+        maxDepth,
+        detectWorkflows,
+        workflowStrategy,
+      });
+      const result = await crawler.crawl();
+
+      // Store the session for later retrieval
+      const sessionId = result.session.sessionId;
+      sessions.set(sessionId, result.session);
+
+      let output: string;
+      if (format === "json") {
+        output = JSON.stringify(result, null, 2);
+      } else {
+        // Markdown format
+        output = formatMultiPageCrawlMarkdown(result, sessionId);
+      }
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: output,
+          },
+        ],
+      };
+    } catch (error) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Multi-page crawl failed: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+  }
+
+  if (name === "get_workflow_by_name") {
+    const { sessionId, workflowName } = GetWorkflowByNameInput.parse(args);
+
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Session not found: ${sessionId}. Available sessions: ${Array.from(sessions.keys()).join(", ") || "none"}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const workflow = session.workflows.find((w) => w.name === workflowName);
+    if (!workflow) {
+      const availableWorkflows = session.workflows.map((w) => w.name).join(", ");
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Workflow not found: ${workflowName}. Available workflows: ${availableWorkflows || "none"}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: JSON.stringify(workflow, null, 2),
+        },
+      ],
+    };
+  }
+
+  if (name === "export_workflow_visualization") {
+    const { sessionId, workflowIds, format } = ExportWorkflowVisualizationInput.parse(args);
+
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Session not found: ${sessionId}. Available sessions: ${Array.from(sessions.keys()).join(", ") || "none"}`,
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    // Filter workflows if specific IDs provided
+    const workflowsToExport = workflowIds
+      ? session.workflows.filter((w) => workflowIds.includes(w.id))
+      : session.workflows;
+
+    if (workflowsToExport.length === 0) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `No workflows found matching the criteria.`,
+          },
+        ],
+      };
+    }
+
+    let output: string;
+    if (format === "individual") {
+      // Export each workflow individually
+      output = workflowsToExport
+        .map((w) => MarkdownExporter.exportWorkflowSequence(w))
+        .join("\n\n---\n\n");
+    } else if (format === "comparison") {
+      // Compare multiple workflows
+      output = MarkdownExporter.exportWorkflowComparison(workflowsToExport);
+    } else {
+      // Full detailed report with all workflows
+      output = MarkdownExporter.exportDetectedWorkflows(workflowsToExport);
+    }
+
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: output,
+        },
+      ],
+    };
+  }
+
   return {
     content: [{ type: "text" as const, text: `Unknown tool: ${name}` }],
     isError: true,
@@ -366,6 +642,47 @@ function formatTestResultsMarkdown(summary: TestExecutionSummary): string {
     }
     markdown += "\n";
   }
+
+  return markdown;
+}
+
+function formatMultiPageCrawlMarkdown(result: MultiPageCrawlResult, sessionId: string): string {
+  const { session, detectedWorkflows, summary } = result;
+
+  let markdown = `# Multi-Page Crawl Results\n\n`;
+  markdown += `**Session ID:** \`${sessionId}\`\n`;
+  markdown += `**Start URL:** ${session.startUrl}\n\n`;
+
+  markdown += `## Summary\n\n`;
+  markdown += `| Metric | Count |\n`;
+  markdown += `|--------|-------|\n`;
+  markdown += `| Pages Visited | ${summary.pagesVisited} |\n`;
+  markdown += `| Total Elements | ${summary.totalElements} |\n`;
+  markdown += `| High-Intent Elements | ${summary.highIntentElements} |\n`;
+  markdown += `| Workflows Detected | ${summary.workflowsDetected} |\n`;
+  markdown += `| Estimated User Journeys | ${summary.estimatedUserJourneys} |\n\n`;
+
+  if (detectedWorkflows.length > 0) {
+    markdown += `## Detected Workflows\n\n`;
+    for (const workflow of detectedWorkflows) {
+      markdown += `### ${workflow.name}\n`;
+      markdown += `- **ID:** \`${workflow.id}\`\n`;
+      markdown += `- **Confidence:** ${workflow.confidence}%\n`;
+      markdown += `- **Pages:** ${workflow.pageSequence.length}\n`;
+      markdown += `- **Tags:** ${workflow.tags.join(", ")}\n\n`;
+    }
+  }
+
+  markdown += `## Usage\n\n`;
+  markdown += `To retrieve a specific workflow, use:\n`;
+  markdown += `\`\`\`\n`;
+  markdown += `get_workflow_by_name(sessionId: "${sessionId}", workflowName: "<workflow_name>")\n`;
+  markdown += `\`\`\`\n\n`;
+
+  markdown += `To export workflow visualizations, use:\n`;
+  markdown += `\`\`\`\n`;
+  markdown += `export_workflow_visualization(sessionId: "${sessionId}", format: "full")\n`;
+  markdown += `\`\`\`\n`;
 
   return markdown;
 }

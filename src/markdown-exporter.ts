@@ -1,4 +1,4 @@
-import { AnalysisResult, GeneratedTestCase, TestPriority } from "./types.js";
+import { AnalysisResult, GeneratedTestCase, TestPriority, DetectedWorkflow, CrawlSession } from "./types.js";
 
 /**
  * MarkdownExporter formats analysis results and test cases into readable markdown
@@ -277,5 +277,222 @@ This report identifies high-intent user interaction points and generates starter
             low: "🟢",
         };
         return emojis[priority];
+    }
+
+    /**
+     * Export detected workflows from a crawl session
+     */
+    static exportDetectedWorkflows(workflows: DetectedWorkflow[]): string {
+        const sections: string[] = [];
+
+        sections.push("# Detected Workflows\n");
+        sections.push(`**Total Workflows Found:** ${workflows.length}\n`);
+
+        if (workflows.length === 0) {
+            sections.push("No workflows detected in this crawl session.\n");
+            return sections.join("\n");
+        }
+
+        // Group by workflow type
+        const byType: Record<string, DetectedWorkflow[]> = {};
+        for (const workflow of workflows) {
+            const type = workflow.tags?.[0] || "unknown";
+            if (!byType[type]) {
+                byType[type] = [];
+            }
+            byType[type].push(workflow);
+        }
+
+        // Summary statistics
+        sections.push("## Workflow Summary\n");
+        for (const [type, workflowsOfType] of Object.entries(byType)) {
+            const avgConfidence = Math.round(
+                workflowsOfType.reduce((sum, w) => sum + w.confidence, 0) / workflowsOfType.length
+            );
+            sections.push(`- **${type}:** ${workflowsOfType.length} workflows (avg confidence: ${avgConfidence}%)`);
+        }
+        sections.push("");
+
+        // Detailed workflow descriptions
+        sections.push("## Detailed Workflows\n");
+        for (const workflow of workflows) {
+            sections.push(this.formatWorkflowDetail(workflow));
+        }
+
+        return sections.join("\n");
+    }
+
+    /**
+     * Export workflow visualization as ASCII flow diagrams
+     */
+    static exportWorkflowSequence(workflow: DetectedWorkflow): string {
+        const lines: string[] = [];
+
+        lines.push(`# Workflow: ${workflow.name}\n`);
+        lines.push(`**Confidence:** ${workflow.confidence}%`);
+        lines.push(`**ID:** \`${workflow.id}\``);
+        if (workflow.tags && workflow.tags.length > 0) {
+            lines.push(`**Tags:** ${workflow.tags.map((t) => `\`${t}\``).join(" ")}`);
+        }
+        lines.push("");
+
+        // Page sequence visualization
+        if (workflow.pageSequence && workflow.pageSequence.length > 0) {
+            lines.push("## Page Sequence\n");
+            lines.push("```");
+            const sequence = workflow.pageSequence
+                .map((url, idx) => `${idx + 1}. ${this.extractPathFromUrl(url)}`)
+                .join("\n     ↓\n");
+            lines.push(sequence);
+            lines.push("```");
+            lines.push("");
+        }
+
+        // Action sequence
+        if (workflow.actionSequence && workflow.actionSequence.length > 0) {
+            lines.push("## Actions Performed\n");
+            for (let i = 0; i < workflow.actionSequence.length; i++) {
+                const action = workflow.actionSequence[i];
+                lines.push(`${i + 1}. **${action.actionType}**: on ${this.extractPathFromUrl(action.pageUrl)}`);
+                lines.push(`   - Locator: ${action.elementLocator}`);
+                if (action.resultingNavigation) {
+                    lines.push(`   - Navigates to: ${action.resultingNavigation}`);
+                }
+                if (action.actionData && Object.keys(action.actionData).length > 0) {
+                    lines.push(`   - Data: ${JSON.stringify(action.actionData)}`);
+                }
+            }
+            lines.push("");
+        }
+
+        // State transitions
+        if (workflow.stateTransitions && workflow.stateTransitions.length > 0) {
+            lines.push("## State Transitions\n");
+            for (const transition of workflow.stateTransitions) {
+                lines.push(`- **${this.extractPathFromUrl(transition.fromPage)}** → **${this.extractPathFromUrl(transition.toPage)}**`);
+                lines.push(`  - Action: ${transition.action.actionType} on ${transition.action.elementLocator}`);
+                if (transition.stateChanges && Object.keys(transition.stateChanges).length > 0) {
+                    lines.push(`  - State Changes: ${JSON.stringify(transition.stateChanges)}`);
+                }
+            }
+            lines.push("");
+        }
+
+        return lines.join("\n");
+    }
+
+    /**
+     * Export workflow comparison for multiple workflows
+     */
+    static exportWorkflowComparison(workflows: DetectedWorkflow[]): string {
+        const lines: string[] = [];
+
+        lines.push("# Workflow Comparison\n");
+        lines.push(`**Workflows Compared:** ${workflows.length}\n`);
+
+        // Create comparison table
+        lines.push("| Workflow | Type | Pages | Actions | Confidence |");
+        lines.push("|----------|------|-------|---------|------------|");
+
+        for (const workflow of workflows) {
+            const type = workflow.tags?.[0] || "unknown";
+            const pages = workflow.pageSequence?.length || 0;
+            const actions = workflow.actionSequence?.length || 0;
+            const confidence = `${workflow.confidence}%`;
+            lines.push(
+                `| ${workflow.name} | ${type} | ${pages} | ${actions} | ${confidence} |`
+            );
+        }
+        lines.push("");
+
+        // Find common patterns
+        if (workflows.length > 1) {
+            lines.push("## Common Patterns\n");
+
+            // Check for same page sequences
+            const pageSequences = workflows.map(w => w.pageSequence?.join(" → ") || "");
+            const duplicatePageSequences = pageSequences.filter(
+                (seq, idx) => pageSequences.indexOf(seq) !== idx
+            );
+
+            if (duplicatePageSequences.length > 0) {
+                lines.push("- **Duplicate Page Sequences Detected:**");
+                const unique = [...new Set(duplicatePageSequences)];
+                for (const seq of unique) {
+                    lines.push(`  - ${seq}`);
+                }
+                lines.push("");
+            }
+
+            // Check for similar action types
+            const allActionTypes = new Set<string>();
+            for (const workflow of workflows) {
+                workflow.actionSequence?.forEach((action) => {
+                    allActionTypes.add(action.actionType);
+                });
+            }
+
+            if (allActionTypes.size > 0) {
+                lines.push("- **Common Action Types:**");
+                for (const actionType of allActionTypes) {
+                    const count = workflows.filter(w =>
+                        w.actionSequence?.some(a => a.actionType === actionType)
+                    ).length;
+                    lines.push(`  - ${actionType} (in ${count}/${workflows.length} workflows)`);
+                }
+                lines.push("");
+            }
+        }
+
+        return lines.join("\n");
+    }
+
+    /**
+     * Format individual workflow details
+     */
+    private static formatWorkflowDetail(workflow: DetectedWorkflow): string {
+        const lines: string[] = [];
+
+        lines.push(`### ${workflow.name}`);
+        lines.push("");
+        lines.push(`**ID:** \`${workflow.id}\``);
+        lines.push(`**Confidence:** ${workflow.confidence}%`);
+
+        if (workflow.tags && workflow.tags.length > 0) {
+            lines.push(`**Tags:** ${workflow.tags.map((t) => `\`${t}\``).join(" ")}`);
+        }
+
+        if (workflow.pageSequence && workflow.pageSequence.length > 0) {
+            lines.push("");
+            lines.push("**Pages:**");
+            for (let i = 0; i < workflow.pageSequence.length; i++) {
+                const url = workflow.pageSequence[i];
+                lines.push(`${i + 1}. ${url}`);
+            }
+        }
+
+        if (workflow.actionSequence && workflow.actionSequence.length > 0) {
+            lines.push("");
+            lines.push("**Actions:**");
+            for (let i = 0; i < workflow.actionSequence.length; i++) {
+                const action = workflow.actionSequence[i];
+                lines.push(`${i + 1}. ${action.actionType} on ${this.extractPathFromUrl(action.pageUrl)}`);
+            }
+        }
+
+        lines.push("");
+        return lines.join("\n");
+    }
+
+    /**
+     * Extract path from full URL
+     */
+    private static extractPathFromUrl(url: string): string {
+        try {
+            const urlObj = new URL(url);
+            return urlObj.pathname || "/";
+        } catch {
+            return url;
+        }
     }
 }

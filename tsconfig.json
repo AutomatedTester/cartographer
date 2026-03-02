@@ -22,6 +22,11 @@
     "src/crawler.ts",
     "src/test-case-generator.ts",
     "src/markdown-exporter.ts",
+    "src/webmcp-semantic-tools.ts",
+    "src/webmcp-semantic-handlers.ts",
+    "src/session-manager.ts",
+    "src/multi-page-crawler.ts",
+    "src/workflow-detector.ts",
     "src/index.ts"
   ],
   "exclude": [
