@@ -26,48 +26,51 @@ export class WorkflowDetector {
         strategy: 'heuristic' | 'ml-based' | 'both' = 'both',
         enableCache = true
     ): DetectedWorkflow[] {
-        // Generate cache key from session pages
-        const cacheKey = this.generateCacheKey(session);
+        try {
+            // Generate cache key from session pages
+            const cacheKey = this.generateCacheKey(session);
 
-        // Check cache if enabled
-        if (enableCache) {
-            const cached = this.detectionCache.get(cacheKey);
-            if (cached && !this.isCacheExpired(cached)) {
-                console.error('[workflow-detector] Cache hit for workflow detection');
-                return cached.workflows;
-            } else if (cached) {
-                console.error('[workflow-detector] Cache expired, recomputing');
-                this.detectionCache.delete(cacheKey);
+            // Check cache if enabled
+            if (enableCache) {
+                const cached = this.detectionCache.get(cacheKey);
+                if (cached && !this.isCacheExpired(cached)) {
+                    return cached.workflows;
+                } else if (cached) {
+                    this.detectionCache.delete(cacheKey);
+                }
             }
+
+            // Perform detection
+            const workflows: DetectedWorkflow[] = [];
+
+            if (strategy === 'heuristic' || strategy === 'both') {
+                workflows.push(...this.detectHeuristicWorkflows(session));
+            }
+
+            if (strategy === 'ml-based' || strategy === 'both') {
+                // TODO: Implement ML-based detection in Phase 4
+                // workflows.push(...this.detectMLBasedWorkflows(session));
+            }
+
+            // Deduplicate and rank by confidence
+            const deduped = this.deduplicateWorkflows(workflows);
+
+            // Store in cache if enabled
+            if (enableCache) {
+                const cacheEntry: WorkflowDetectionCache = {
+                    sequenceHash: cacheKey,
+                    workflows: deduped,
+                    timestamp: Date.now(),
+                    ttl: this.DEFAULT_CACHE_TTL,
+                };
+                this.detectionCache.set(cacheKey, cacheEntry);
+            }
+
+            return deduped;
+        } catch (error) {
+            // Return empty array on error instead of crashing
+            return [];
         }
-
-        // Perform detection
-        const workflows: DetectedWorkflow[] = [];
-
-        if (strategy === 'heuristic' || strategy === 'both') {
-            workflows.push(...this.detectHeuristicWorkflows(session));
-        }
-
-        if (strategy === 'ml-based' || strategy === 'both') {
-            // TODO: Implement ML-based detection in Phase 4
-            // workflows.push(...this.detectMLBasedWorkflows(session));
-        }
-
-        // Deduplicate and rank by confidence
-        const deduped = this.deduplicateWorkflows(workflows);
-
-        // Store in cache if enabled
-        if (enableCache) {
-            const cacheEntry: WorkflowDetectionCache = {
-                sequenceHash: cacheKey,
-                workflows: deduped,
-                timestamp: Date.now(),
-                ttl: this.DEFAULT_CACHE_TTL,
-            };
-            this.detectionCache.set(cacheKey, cacheEntry);
-        }
-
-        return deduped;
     }
 
     /**
@@ -98,7 +101,6 @@ export class WorkflowDetector {
      */
     static clearCache(): void {
         this.detectionCache.clear();
-        console.error('[workflow-detector] Cache cleared');
     }
 
     /**
@@ -117,10 +119,29 @@ export class WorkflowDetector {
     private static detectHeuristicWorkflows(session: CrawlSession): DetectedWorkflow[] {
         const workflows: DetectedWorkflow[] = [];
 
-        workflows.push(...this.detectFormSubmissionFlows(session));
-        workflows.push(...this.detectAuthFlows(session));
-        workflows.push(...this.detectNavigationPatterns(session));
-        workflows.push(...this.detectMultiStepForms(session));
+        try {
+            workflows.push(...this.detectFormSubmissionFlows(session));
+        } catch (e) {
+            // Continue on error
+        }
+
+        try {
+            workflows.push(...this.detectAuthFlows(session));
+        } catch (e) {
+            // Continue on error
+        }
+
+        try {
+            workflows.push(...this.detectNavigationPatterns(session));
+        } catch (e) {
+            // Continue on error
+        }
+
+        try {
+            workflows.push(...this.detectMultiStepForms(session));
+        } catch (e) {
+            // Continue on error
+        }
 
         return workflows;
     }
@@ -131,9 +152,22 @@ export class WorkflowDetector {
     private static detectFormSubmissionFlows(session: CrawlSession): DetectedWorkflow[] {
         const workflows: DetectedWorkflow[] = [];
 
+        // Safety check
+        if (!session || !session.pages || !Array.isArray(session.pages)) {
+            return workflows;
+        }
+
         for (let i = 0; i < session.pages.length - 1; i++) {
             const currentPage = session.pages[i];
             const nextPage = session.pages[i + 1];
+
+            // Safety checks for page objects
+            if (!currentPage || !currentPage.highIntentElements || !Array.isArray(currentPage.highIntentElements)) {
+                continue;
+            }
+            if (!nextPage || !nextPage.highIntentElements || !Array.isArray(nextPage.highIntentElements)) {
+                continue;
+            }
 
             // Check if current page has forms
             const hasForm = currentPage.highIntentElements.some(
@@ -188,8 +222,18 @@ export class WorkflowDetector {
     private static detectAuthFlows(session: CrawlSession): DetectedWorkflow[] {
         const workflows: DetectedWorkflow[] = [];
 
+        // Safety check
+        if (!session || !session.pages || !Array.isArray(session.pages)) {
+            return workflows;
+        }
+
         for (let i = 0; i < session.pages.length - 1; i++) {
             const page = session.pages[i];
+
+            // Safety check for page object
+            if (!page || !page.highIntentElements || !Array.isArray(page.highIntentElements)) {
+                continue;
+            }
 
             // Check for auth page indicators
             const isAuthPage =
@@ -212,6 +256,9 @@ export class WorkflowDetector {
             // Find next page(s) and check for dashboard/profile indicators
             const nextPages = session.pages.slice(i + 1, i + 3);
             for (const nextPage of nextPages) {
+                // Safety check for next page
+                if (!nextPage) continue;
+
                 const isDashboard =
                     nextPage.url.includes('/dashboard') ||
                     nextPage.url.includes('/home') ||
@@ -249,6 +296,17 @@ export class WorkflowDetector {
         hasSubmitButton: boolean;
         confidence: number;
     } {
+        // Safety check
+        if (!page || !page.highIntentElements || !Array.isArray(page.highIntentElements)) {
+            return {
+                isLoginPage: false,
+                hasUsernameField: false,
+                hasPasswordField: false,
+                hasSubmitButton: false,
+                confidence: 0,
+            };
+        }
+
         // Check URL patterns
         const isLoginUrl =
             page.url.includes('/login') ||

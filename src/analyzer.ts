@@ -99,15 +99,15 @@ export class DomAnalyzer {
 
   private async loadAndCacheModel(): Promise<void> {
     const initStartTime = performance.now();
-    
+
     // Check WebNN support first to avoid timeout delays
     const webnnSupported = await this.isWebNNSupported();
-    
+
     // Try devices in order of preference, skip WebNN if not supported
     const devices = webnnSupported
       ? (["webnn", "webgpu", "wasm"] as const)
       : (["webgpu", "wasm"] as const);
-    
+
     for (const device of devices) {
       try {
         // PHASE 2 OPTIMIZATION: Advanced pipeline options
@@ -133,7 +133,7 @@ export class DomAnalyzer {
         );
       }
     }
-    
+
     DomAnalyzer.globalDevice = 'none';
     DomAnalyzer.globalModelLoadTime = performance.now() - initStartTime;
     console.warn(
@@ -158,7 +158,7 @@ export class DomAnalyzer {
     maxBatchSize: number = 50
   ): Promise<AnalysisResult> {
     const overallStartTime = performance.now();
-    
+
     // DOM extraction
     const domStartTime = performance.now();
     const dom = extractDom(10);
@@ -170,7 +170,7 @@ export class DomAnalyzer {
     // ML deduplication (if model available) or fallback to description dedup
     const dedupStartTime = performance.now();
     let deduped: HighIntentElement[] = [];
-    
+
     if (!this.extractor) {
       const seen = new Set<string>();
       for (const el of highIntentElements) {
@@ -183,9 +183,9 @@ export class DomAnalyzer {
     } else {
       // Use ML model to deduplicate by semantic similarity
       const descriptions = highIntentElements.map((el) => elementDescription(el));
-      
+
       const embeddings: number[][] = [];
-      
+
       // PHASE 2 OPTIMIZATION: GPU memory management with batching
       // For large DOMs (100+ elements), process in batches to prevent OOM
       if (descriptions.length > maxBatchSize) {
@@ -198,7 +198,9 @@ export class DomAnalyzer {
             batch.map(desc => this.extractor!(desc))
           );
           batchResults.forEach(result => {
-            embeddings.push(Array.isArray(result[0]) ? result[0][0] : result[0]);
+            if (result) {
+              embeddings.push(Array.isArray(result[0]) ? result[0][0] : result[0]);
+            }
           });
         }
       } else {
@@ -207,10 +209,12 @@ export class DomAnalyzer {
           descriptions.map(desc => this.extractor!(desc))
         );
         embeddingResults.forEach(result => {
-          embeddings.push(Array.isArray(result[0]) ? result[0][0] : result[0]);
+          if (result) {
+            embeddings.push(Array.isArray(result[0]) ? result[0][0] : result[0]);
+          }
         });
       }
-      
+
       const used = new Array(highIntentElements.length).fill(false);
       const threshold = 0.92;
       for (let i = 0; i < highIntentElements.length; ++i) {
@@ -225,7 +229,7 @@ export class DomAnalyzer {
         }
       }
     }
-    
+
     const deduplicationTime = performance.now() - dedupStartTime;
     deduped.sort((a, b) => b.intentScore - a.intentScore);
 
@@ -233,7 +237,7 @@ export class DomAnalyzer {
     const allNavLinks = new Set<string>();
     const allElements = document.querySelectorAll('a[href], form[action], [onclick], button, [role="button"]');
     const navigationKeywords = ["sign in", "login", "log in", "get started", "start now", "register", "signup", "sign up", "submit", "next", "continue"];
-    
+
     for (const el of allElements) {
       let href: string | undefined;
       if (el.tagName === 'A') {
@@ -250,7 +254,7 @@ export class DomAnalyzer {
         if (dataHref && typeof dataHref === 'string' && !dataHref.startsWith('#')) {
           allNavLinks.add(dataHref);
         }
-        
+
         // For buttons without explicit targets, mark that they're navigable
         // This is a placeholder that will be captured when the button is clicked
         const btnText = ((el.textContent || el.innerText || '') as string).toLowerCase().trim();
@@ -403,7 +407,7 @@ export class DomAnalyzer {
         intentScore += 20; // Boost score for submit buttons
         reasons.push("submit button in form");
       }
-      
+
       // Enhanced button navigation detection for SPA/modern apps
       if (tag === "button" || role === "button") {
         // Check for data attributes indicating navigation
@@ -418,14 +422,14 @@ export class DomAnalyzer {
             }
           }
         }
-        
+
         // If button has onclick attribute, mark as navigative interactive
         if (!navigationTarget && el.attributes?.onclick) {
           navigates = true;
           intentScore += 10; // Slight boost for onclick handlers
           reasons.push("button with onclick handler");
         }
-        
+
         // Buttons with semantic navigation text without explicit target should still navigate
         // This allows clicking to capture the actual URL
         if (!navigationTarget && (el.text || el.ariaLabel)) {

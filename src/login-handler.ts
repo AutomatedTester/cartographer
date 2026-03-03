@@ -49,22 +49,21 @@ export class LoginHandler {
         const fields: Array<{ type: 'username' | 'password'; selector: string; element: any }> = [];
 
         try {
-            console.error('[login-handler] 🔍 Searching for login form fields...');
-            
             // Look for password input first (most likely to exist)
-            const passwordInputs = await this.driver.findElements(
-                By.css('input[type="password"]')
-            );
+            try {
+                const passwordInputs = await this.driver.findElements(
+                    By.css('input[type="password"]')
+                );
 
-            if (passwordInputs.length > 0) {
-                console.error('[login-handler] ✅ Found ' + passwordInputs.length + ' password input(s)');
-                fields.push({
-                    type: 'password',
-                    selector: 'input[type="password"]',
-                    element: passwordInputs[0],
-                });
-            } else {
-                console.error('[login-handler] ❌ No password input found');
+                if (passwordInputs && passwordInputs.length > 0) {
+                    fields.push({
+                        type: 'password',
+                        selector: 'input[type="password"]',
+                        element: passwordInputs[0],
+                    });
+                }
+            } catch (e) {
+                // Continue to next selector
             }
 
             // Look for username/email input
@@ -81,27 +80,24 @@ export class LoginHandler {
                 'input[autocomplete="username"]',
             ];
 
-            console.error('[login-handler] Trying username selectors...');
             for (const selector of usernameSelectors) {
-                const elements = await this.driver.findElements(By.css(selector));
-                if (elements.length > 0) {
-                    console.error('[login-handler] ✅ Found ' + elements.length + ' element(s) with selector: ' + selector);
-                    if (!fields.some((f) => f.type === 'username')) {
-                        fields.unshift({
-                            type: 'username',
-                            selector,
-                            element: elements[0],
-                        });
-                        break;
+                try {
+                    const elements = await this.driver.findElements(By.css(selector));
+                    if (elements && elements.length > 0) {
+                        if (!fields.some((f) => f.type === 'username')) {
+                            fields.unshift({
+                                type: 'username',
+                                selector,
+                                element: elements[0],
+                            });
+                            break;
+                        }
                     }
+                } catch (selectorError) {
+                    // Continue to next selector
                 }
             }
 
-            if (!fields.some(f => f.type === 'username')) {
-                console.error('[login-handler] ❌ No username input found');
-            }
-
-            console.error('[login-handler] Found ' + fields.length + ' total login fields');
             return fields;
         } catch (error) {
             console.error('[login-handler] Error finding login fields:', error);
@@ -140,10 +136,12 @@ export class LoginHandler {
         // Fallback: find any button in a form with login in its text
         try {
             const buttons = await this.driver.findElements(By.css('form button, form input[type="submit"]'));
-            for (const button of buttons) {
-                const text = await button.getAttribute('value');
-                if (text && text.toLowerCase().includes('login')) {
-                    return button;
+            if (buttons && buttons.length > 0) {
+                for (const button of buttons) {
+                    const text = await button.getAttribute('value');
+                    if (text && text.toLowerCase().includes('login')) {
+                        return button;
+                    }
                 }
             }
         } catch (e) {
@@ -158,10 +156,6 @@ export class LoginHandler {
      */
     async fillLoginForm(username: string, password: string): Promise<void> {
         try {
-            console.error('[login-handler] 📝 Starting to fill login form...');
-            console.error('[login-handler] Username: ' + username.substring(0, 3) + '***');
-            console.error('[login-handler] Password: ' + '*'.repeat(password.length));
-
             const fields = await this.findLoginFields();
 
             if (fields.length === 0) {
@@ -170,39 +164,43 @@ export class LoginHandler {
 
             // Fill username field
             const usernameField = fields.find((f) => f.type === 'username');
-            if (usernameField) {
-                console.error('[login-handler] 🔤 Filling username field...');
-                await usernameField.element.clear();
-                console.error('[login-handler]   Cleared field');
-                await usernameField.element.sendKeys(username);
-                console.error('[login-handler]   ✅ Sent username to field');
+            if (usernameField && usernameField.element) {
+                try {
+                    await usernameField.element.clear();
+                    await usernameField.element.sendKeys(username);
+                } catch (fillError) {
+                    console.error('[login-handler] Error filling username field:', fillError);
+                    throw fillError;
+                }
             } else {
                 // If no specific username field, fill first text input before password
-                console.error('[login-handler] ⚠️  No specific username field, searching for fallback...');
                 const allInputs = await this.driver.findElements(By.css('input[type="text"], input[type="email"], input:not([type="password"])'));
-                if (allInputs.length > 0) {
-                    console.error('[login-handler] Found ' + allInputs.length + ' fallback inputs, using first...');
-                    await allInputs[0].clear();
-                    await allInputs[0].sendKeys(username);
-                    console.error('[login-handler] ✅ Filled fallback input with username');
+                if (allInputs && allInputs.length > 0) {
+                    try {
+                        await allInputs[0].clear();
+                        await allInputs[0].sendKeys(username);
+                    } catch (fallbackError) {
+                        console.error('[login-handler] Error filling fallback input:', fallbackError);
+                        throw fallbackError;
+                    }
                 } else {
-                    console.error('[login-handler] ❌ No username or fallback input found!');
+                    throw new Error('No username input field found');
                 }
             }
 
             // Fill password field
             const passwordField = fields.find((f) => f.type === 'password');
-            if (passwordField) {
-                console.error('[login-handler] 🔐 Filling password field...');
-                await passwordField.element.clear();
-                console.error('[login-handler]   Cleared field');
-                await passwordField.element.sendKeys(password);
-                console.error('[login-handler]   ✅ Sent password to field');
+            if (passwordField && passwordField.element) {
+                try {
+                    await passwordField.element.clear();
+                    await passwordField.element.sendKeys(password);
+                } catch (fillError) {
+                    console.error('[login-handler] Error filling password field:', fillError);
+                    throw fillError;
+                }
             } else {
                 throw new Error('Password field not found');
             }
-
-            console.error('[login-handler] ✅ Form filled with credentials');
         } catch (error) {
             console.error('[login-handler] ❌ Error filling login form:', error);
             throw error;
@@ -214,25 +212,19 @@ export class LoginHandler {
      */
     async submitForm(): Promise<void> {
         try {
-            console.error('[login-handler] 🔘 Looking for submit button...');
             const submitButton = await this.findSubmitButton();
 
             if (!submitButton) {
-                console.error('[login-handler] ⚠️  No submit button found, trying to submit form via JavaScript...');
                 // Try submitting the form directly
                 const forms = await this.driver.findElements(By.css('form'));
-                if (forms.length > 0) {
-                    console.error('[login-handler] Found ' + forms.length + ' form(s), submitting first...');
+                if (forms && forms.length > 0) {
                     await this.driver.executeScript('arguments[0].submit();', forms[0]);
-                    console.error('[login-handler] ✅ Submitted form via JavaScript');
                     return;
                 }
                 throw new Error('No submit button or form found');
             }
 
-            console.error('[login-handler] ✅ Found submit button, clicking it...');
             await submitButton.click();
-            console.error('[login-handler] ✅ Clicked submit button');
         } catch (error) {
             console.error('[login-handler] Error submitting form:', error);
             throw error;
@@ -244,25 +236,20 @@ export class LoginHandler {
      */
     async waitForPageLoad(timeoutMs: number = 30000): Promise<void> {
         try {
-            console.error('[login-handler] ⏳ Waiting for document.readyState === "complete" (timeout: ' + timeoutMs + 'ms)...');
             // Wait for document ready state
             await this.driver.wait(
                 async () => {
                     const readyState = await this.driver.executeScript(
                         'return document.readyState'
                     );
-                    console.error('[login-handler]   readyState:', readyState);
                     return readyState === 'complete';
                 },
                 timeoutMs
             );
 
-            console.error('[login-handler] ✅ Document ready, waiting 1s for network to stabilize...');
             // Additional wait for network to be idle (simple heuristic)
             await this.driver.sleep(1000);
-            console.error('[login-handler] ✅ Page loaded successfully');
         } catch (error) {
-            console.error('[login-handler] ⚠️  Timeout waiting for page load:', error);
             // Don't throw - page might be loaded even if this times out
         }
     }
@@ -278,10 +265,7 @@ export class LoginHandler {
         const verbose = options?.verbose ?? false;
 
         try {
-            console.error('[login-handler] 🔍 Validating login success...');
-            
             // Wait for redirect
-            console.error('[login-handler]   Checking for URL change (timeout: ' + maxWaitTime + 'ms)...');
             await this.driver.wait(
                 async () => {
                     const currentUrl = await this.driver.getCurrentUrl();
@@ -290,14 +274,11 @@ export class LoginHandler {
                 maxWaitTime
             ).catch(() => {
                 // Timeout is OK - page might have changed without URL changing
-                if (verbose) console.error('[login-handler]   ⚠️  No URL change detected');
             });
 
             const currentUrl = await this.driver.getCurrentUrl();
-            console.error('[login-handler]   Current URL: ' + currentUrl);
 
             // Check for logout button/link
-            console.error('[login-handler]   Checking for logout indicators...');
             const logoutIndicators = [
                 'a:contains("Logout")',
                 'a:contains("Log out")',
@@ -315,17 +296,14 @@ export class LoginHandler {
                     const elements = await this.driver.findElements(By.css(selector));
                     if (elements.length > 0) {
                         hasLogoutButton = true;
-                        console.error('[login-handler]   ✅ Found logout button with selector: ' + selector);
                         break;
                     }
                 } catch (e) {
                     // Continue
                 }
             }
-            if (!hasLogoutButton) console.error('[login-handler]   ❌ No logout button found');
 
             // Check for profile/user elements
-            console.error('[login-handler]   Checking for profile indicators...');
             const profileIndicators = [
                 '[class*="profile" i]',
                 '[class*="user-menu" i]',
@@ -340,38 +318,22 @@ export class LoginHandler {
                     const elements = await this.driver.findElements(By.css(selector));
                     if (elements.length > 0) {
                         hasProfileElement = true;
-                        console.error('[login-handler]   ✅ Found profile element with selector: ' + selector);
                         break;
                     }
                 } catch (e) {
                     // Continue
                 }
             }
-            if (!hasProfileElement) console.error('[login-handler]   ❌ No profile element found');
 
             // Check if login form is still visible
-            console.error('[login-handler]   Checking if login form is still visible...');
             const loginFormFields = await this.findLoginFields();
             const loginFormStillVisible = loginFormFields.length > 0;
-            if (loginFormStillVisible) {
-                console.error('[login-handler]   ❌ Login form still visible (' + loginFormFields.length + ' fields)');
-            } else {
-                console.error('[login-handler]   ✅ Login form is gone');
-            }
 
             // Determine success based on multiple indicators
             const urlChanged = currentUrl !== originalUrl;
             const isNotOnLoginPage = !currentUrl.includes('/login') && !currentUrl.includes('/signin');
-            
-            console.error('[login-handler]   Summary: urlChanged=' + urlChanged + ', logoutBtn=' + hasLogoutButton + ', profile=' + hasProfileElement + ', formVisible=' + loginFormStillVisible);
 
             const success = (hasLogoutButton || hasProfileElement || urlChanged) && !loginFormStillVisible;
-            
-            if (success) {
-                console.error('[login-handler] ✅ Login SUCCESSFUL');
-            } else {
-                console.error('[login-handler] ❌ Login FAILED or INCONCLUSIVE');
-            }
 
             return {
                 success,
@@ -411,12 +373,32 @@ export class LoginHandler {
             console.error('[login-handler] Username: ' + username.substring(0, 3) + '***');
             console.error('[login-handler] ============================================');
 
+            // Find fields first to verify they exist
+            console.error('[login-handler] Step 1: Finding login form fields...');
+            const fields = await this.findLoginFields();
+            console.error('[login-handler] Found ' + fields.length + ' fields: ' + fields.map(f => f.type).join(', '));
+
+            if (fields.length === 0) {
+                console.error('[login-handler] ❌ ERROR: No login form fields found! Cannot proceed with login.');
+                return {
+                    success: false,
+                    reason: 'No login form fields found on page',
+                    currentUrl: await this.driver.getCurrentUrl(),
+                };
+            }
+
             // Fill and submit
+            console.error('[login-handler] Step 2: Filling login form with credentials...');
             await this.fillLoginForm(username, password);
+
+            console.error('[login-handler] Step 3: Submitting login form...');
             await this.submitForm();
+
+            console.error('[login-handler] Step 4: Waiting for page load...');
             await this.waitForPageLoad();
 
             // Validate
+            console.error('[login-handler] Step 5: Validating login success...');
             const result = await this.validateLoginSuccess(url, options);
             console.error('[login-handler] ============================================');
             console.error('[login-handler] 📊 LOGIN VALIDATION RESULT');
@@ -427,14 +409,11 @@ export class LoginHandler {
 
             return result;
         } catch (error) {
-            console.error('[login-handler] ============================================');
-            console.error('[login-handler] ❌ ERROR IN LOGIN FLOW');
-            console.error('[login-handler] Error:', error instanceof Error ? error.message : error);
-            console.error('[login-handler] ============================================');
+            console.error('[login-handler] Error in login flow:', error instanceof Error ? error.message : String(error));
             return {
                 success: false,
                 reason: `Login flow failed: ${error instanceof Error ? error.message : String(error)}`,
-                currentUrl: await this.driver.getCurrentUrl(),
+                currentUrl: await this.driver.getCurrentUrl().catch(() => 'unknown'),
             };
         }
     }

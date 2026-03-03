@@ -139,7 +139,7 @@ export class MultiPageCrawler {
                 detectedWorkflows: session.workflows,
                 summary: {
                     pagesVisited: session.pages.length,
-                    totalElements: session.pages.reduce((acc, p) => acc + p.highIntentElements.length, 0),
+                    totalElements: session.pages.reduce((acc, p) => acc + (p && p.highIntentElements ? p.highIntentElements.length : 0), 0),
                     highIntentElements: session.metadata.totalHighIntentElements,
                     workflowsDetected: session.workflows.length,
                     estimatedUserJourneys: session.workflows.filter((w) => w.confidence > 0.75).length,
@@ -192,15 +192,15 @@ export class MultiPageCrawler {
                 url,
                 this.config.intentThreshold
             );
-            console.error(`[multi-page-crawler] Page analyzed, got ${result.highIntentElements?.length || 0} high-intent elements`);
+            console.error(`[multi-page-crawler] Page analyzed, got ${result?.highIntentElements?.length || 0} high-intent elements`);
 
             const page: CrawledPage = {
                 url,
-                title: result.title,
+                title: result?.title || 'Untitled',
                 timestamp: Date.now(),
-                highIntentElements: result.highIntentElements,
-                generatedTestCases: result.generatedTestCases,
-                consoleLogs: result.consoleLogs,
+                highIntentElements: result?.highIntentElements || [],
+                generatedTestCases: result?.generatedTestCases || [],
+                consoleLogs: result?.consoleLogs || [],
             };
 
             this.sessionManager.addPage(page);
@@ -237,6 +237,9 @@ export class MultiPageCrawler {
             return { url, nextUrls };
         } catch (error) {
             console.error(`[multi-page-crawler] Error crawling ${url}:`, error);
+            if (error instanceof Error) {
+                console.error(`[multi-page-crawler] Error stack:`, error.stack);
+            }
             return null;
         }
     }
@@ -245,6 +248,12 @@ export class MultiPageCrawler {
      * Handle login form if present on the current page
      */
     private async handleLoginFormIfPresent(page: CrawledPage): Promise<void> {
+        // Safety check
+        if (!page || !page.url) {
+            console.error('[multi-page-crawler] Page object is invalid, skipping login handling');
+            return;
+        }
+
         // Check if credentials are available
         const sessionState = this.sessionManager.getState();
         const username = sessionState.username;
@@ -252,67 +261,43 @@ export class MultiPageCrawler {
 
         // If no credentials, skip login handling
         if (!username || !password) {
-            console.error(
-                `[multi-page-crawler] No credentials in session state, skipping login handling`
-            );
             return;
         }
 
-        console.error(
-            `[multi-page-crawler] Credentials found, checking if ${page.url} is a login page...`
-        );
-
         // Check if this is a login form page (via HighIntentElements)
         const loginCheck = WorkflowDetector.isLoginFormPage(page);
-        console.error(
-            `[multi-page-crawler] Login form detection result: isLoginPage=${loginCheck.isLoginPage}, confidence=${loginCheck.confidence}`
-        );
 
         // Also check for login form inputs in the DOM (for modals/overlays)
         const driver = this.baseCrawler.getDriver();
         let hasLoginFormInDOM = false;
-        let domLoginCheckDetails = 'No login form inputs found in DOM';
-        
+
         if (driver) {
             try {
                 const passwordInputs = await driver.findElements(By.css('input[type="password"]'));
                 const usernameInputs = await driver.findElements(By.css('input[type="email"], input[type="text"][autocomplete*="user"], input[name="username"], input[aria-label*="username" i]'));
-                
-                if (passwordInputs.length > 0 && usernameInputs.length > 0) {
+
+                const passwordCount = passwordInputs ? (Array.isArray(passwordInputs) ? passwordInputs.length : 0) : 0;
+                const usernameCount = usernameInputs ? (Array.isArray(usernameInputs) ? usernameInputs.length : 0) : 0;
+
+                if (passwordCount > 0 && usernameCount > 0) {
                     hasLoginFormInDOM = true;
-                    domLoginCheckDetails = 'Login form inputs found in DOM (' + usernameInputs.length + ' username, ' + passwordInputs.length + ' password)';
-                    console.error(`[multi-page-crawler] 🔐 ${domLoginCheckDetails}`);
-                }
-                if (passwordInputs.length > 0) {
-                    console.error(`[multi-page-crawler]   Found ${passwordInputs.length} password input(s) in DOM`);
-                }
-                if (usernameInputs.length > 0) {
-                    console.error(`[multi-page-crawler]   Found ${usernameInputs.length} username input(s) in DOM`);
                 }
             } catch (e) {
-                console.error(`[multi-page-crawler] Error checking for login form in DOM:`, e);
+                // Continue if error
             }
         }
 
         // Determine if we should handle login
         const shouldHandleLogin = loginCheck.isLoginPage || hasLoginFormInDOM;
-        
+
         if (!shouldHandleLogin) {
-            console.error(
-                `[multi-page-crawler] Page ${page.url} is not a login form page (confidence: ${loginCheck.confidence})`
-            );
             return;
         }
-
-        console.error(
-            `[multi-page-crawler] Login form detected on ${page.url} (confidence: ${loginCheck.confidence}, domFound: ${hasLoginFormInDOM})`
-        );
 
         try {
             // Get WebDriver instance from crawler
             const driver = this.baseCrawler.getDriver();
             if (!driver) {
-                console.error('[multi-page-crawler] WebDriver not available for login');
                 return;
             }
 
@@ -320,17 +305,13 @@ export class MultiPageCrawler {
             const loginHandler = new LoginHandler(driver);
             const result = await loginHandler.performLogin(username, password, page.url, {
                 maxWaitTime: this.config.pageLoadTimeout || 30000,
-                verbose: true,
+                verbose: false,
             });
 
             if (result.success) {
-                console.error('[multi-page-crawler] Login successful, continuing with crawl...');
                 // Update session state to mark login as successful
                 this.sessionManager.updateState('lastLoginSuccess', Date.now());
             } else {
-                console.error(
-                    `[multi-page-crawler] Login failed: ${result.reason}`
-                );
                 // Update session state to mark login as failed
                 this.sessionManager.updateState('lastLoginFailure', {
                     timestamp: Date.now(),
@@ -392,13 +373,13 @@ export class MultiPageCrawler {
 
         // Convert to array for return
         const result = Array.from(targets);
-        
+
         // Store button URLs in page for later click handling
         if (buttonUrls.length > 0) {
             (page as any).pendingButtonClicks = buttonUrls;
             console.error(`[multi-page-crawler] Found ${buttonUrls.length} buttons to click for navigation`);
         }
-        
+
         return result;
     }
 
@@ -410,7 +391,7 @@ export class MultiPageCrawler {
     private async handlePendingButtonClicks(page: CrawledPage, pageUrl: string): Promise<string[]> {
         const discoveredUrls: string[] = [];
         const pendingClicks = (page as any).pendingButtonClicks as string[] | undefined;
-        
+
         if (!pendingClicks || pendingClicks.length === 0) {
             return discoveredUrls;
         }
@@ -480,7 +461,7 @@ export class MultiPageCrawler {
                         await driver.executeScript(`
                             const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
                             const searchTerm = '${buttonId.toLowerCase()}';
-                            const btn = buttons.find(b => 
+                            const btn = buttons.find(b =>
                                 b.textContent?.toLowerCase().includes(searchTerm) ||
                                 b.getAttribute('aria-label')?.toLowerCase().includes(searchTerm) ||
                                 b.id?.toLowerCase().includes(searchTerm)
@@ -501,43 +482,43 @@ export class MultiPageCrawler {
 
                 if (clicked) {
                     console.error(`[multi-page-crawler]   ✅ Button clicked, waiting for navigation or modal...`);
-                    
+
                     // Wait for navigation (max 5 seconds) OR for login form to appear
                     const startUrl = await driver.getCurrentUrl();
                     let newUrl = startUrl;
                     let attempts = 0;
                     const maxAttempts = 50; // 5 seconds with 100ms intervals
                     let loginFormDetected = false;
-                    
+
                     while (newUrl === startUrl && attempts < maxAttempts && !loginFormDetected) {
                         await new Promise(resolve => setTimeout(resolve, 100));
                         try {
                             newUrl = await driver.getCurrentUrl();
-                            
+
                             // Check if a login form has appeared (modal/dialog)
                             const hasPasswordInput = await driver.findElements(By.css('input[type="password"]')).then(els => els.length > 0);
                             const hasUsernameInput = await driver.findElements(By.css('input[type="email"], input[type="text"][autocomplete*="user"], input[name="username"]')).then(els => els.length > 0);
-                            
+
                             if (hasPasswordInput && (hasUsernameInput || true)) {
                                 console.error(`[multi-page-crawler]   🔐 Login form detected after button click!`);
                                 loginFormDetected = true;
-                                
-                            // Immediately handle login if form appears
+
+                                // Immediately handle login if form appears
                                 console.error(`[multi-page-crawler]   🔐 Attempting to login with detected form...`);
                                 try {
                                     const loginHandler = new LoginHandler(driver);
                                     const sessionState = this.sessionManager.getState();
                                     const username = sessionState.username;
                                     const password = sessionState.password;
-                                    
+
                                     if (username && password) {
                                         const result = await loginHandler.performLogin(username, password, newUrl);
                                         console.error(`[multi-page-crawler]   🔐 Login result: success=${result.success}, reason=${result.reason}`);
-                                        
+
                                         if (result.success) {
                                             this.sessionManager.updateState('lastLoginSuccess', Date.now());
                                             console.error(`[multi-page-crawler] ✅ Login successful!`);
-                                            
+
                                             // Add the authenticated page URL to the queue for further crawling
                                             const authenticatedUrl = result.currentUrl;
                                             if (authenticatedUrl && authenticatedUrl !== startUrl) {
