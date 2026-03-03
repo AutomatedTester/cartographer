@@ -1,4 +1,4 @@
-import { WebDriver, until, By, logging } from 'selenium-webdriver';
+import { WebDriver, until, By, logging, Key } from 'selenium-webdriver';
 
 /**
  * Options for login validation
@@ -44,29 +44,115 @@ export class LoginHandler {
      * @returns Array of field info with selectors
      */
     async findLoginFields(): Promise<
-        Array<{ type: 'username' | 'password'; selector: string; element: any }>
+        Array<{
+            type: 'username' | 'password';
+            selector: string;
+            element: any;
+            isCustomSelect?: boolean;
+            container?: any;
+        }>
     > {
-        const fields: Array<{ type: 'username' | 'password'; selector: string; element: any }> = [];
+        const fields: Array<{
+            type: 'username' | 'password';
+            selector: string;
+            element: any;
+            isCustomSelect?: boolean;
+            container?: any;
+        }> = [];
 
         try {
             // Look for password input first (most likely to exist)
             try {
+                // First check for custom select containers with password-related attributes
+                const customPasswordContainers = await this.driver.findElements(
+                    By.xpath(
+                        `//div[contains(@class, 'select') or contains(@class, 'Select') or contains(@id, 'password') or @role='combobox'][.//input[contains(@type, 'password') or contains(@name, 'password')]]`
+                    )
+                );
+
+                if (customPasswordContainers && customPasswordContainers.length > 0) {
+                    const isCustom = await this.isCustomSelectContainer(customPasswordContainers[0]);
+                    if (isCustom) {
+                        const hiddenInput = await customPasswordContainers[0].findElements(
+                            By.css('input[type="password"]')
+                        );
+                        if (hiddenInput.length > 0) {
+                            fields.push({
+                                type: 'password',
+                                selector: 'custom-select-password',
+                                element: hiddenInput[0],
+                                isCustomSelect: true,
+                                container: customPasswordContainers[0],
+                            });
+                            return fields;
+                        }
+                    }
+                }
+
+                // Standard password input lookup
                 const passwordInputs = await this.driver.findElements(
                     By.css('input[type="password"]')
                 );
 
                 if (passwordInputs && passwordInputs.length > 0) {
-                    fields.push({
-                        type: 'password',
-                        selector: 'input[type="password"]',
-                        element: passwordInputs[0],
-                    });
+                    // Check if it's wrapped in a custom container
+                    const parent = await this.driver.executeScript(
+                        'return arguments[0].parentElement',
+                        passwordInputs[0]
+                    );
+
+                    const isCustom = await this.isCustomSelectContainer(parent);
+                    if (isCustom) {
+                        fields.push({
+                            type: 'password',
+                            selector: 'input[type="password"]',
+                            element: passwordInputs[0],
+                            isCustomSelect: true,
+                            container: parent,
+                        });
+                    } else {
+                        fields.push({
+                            type: 'password',
+                            selector: 'input[type="password"]',
+                            element: passwordInputs[0],
+                        });
+                    }
                 }
             } catch (e) {
                 // Continue to next selector
             }
 
             // Look for username/email input
+            // First try to find custom select containers for username
+            const customUsernameContainers = await this.driver.findElements(
+                By.xpath(
+                    `//div[contains(@class, 'select') or contains(@id, 'username') or contains(@id, 'email') or @role='combobox'][.//input[not(@type='password')]]`
+                )
+            );
+
+            if (
+                customUsernameContainers &&
+                customUsernameContainers.length > 0 &&
+                !fields.some((f) => f.type === 'username')
+            ) {
+                const isCustom = await this.isCustomSelectContainer(customUsernameContainers[0]);
+                if (isCustom) {
+                    const hiddenInputs = await customUsernameContainers[0].findElements(
+                        By.css('input[type="text"]')
+                    );
+                    if (hiddenInputs.length > 0) {
+                        fields.unshift({
+                            type: 'username',
+                            selector: 'custom-select-username',
+                            element: hiddenInputs[0],
+                            isCustomSelect: true,
+                            container: customUsernameContainers[0],
+                        });
+                        return fields;
+                    }
+                }
+            }
+
             // Check for common IDs and names
             const usernameSelectors = [
                 'input[type="email"]',
@@ -85,10 +171,19 @@ export class LoginHandler {
                     const elements = await this.driver.findElements(By.css(selector));
                     if (elements && elements.length > 0) {
                         if (!fields.some((f) => f.type === 'username')) {
+                            // Check if wrapped in custom container
+                            const parent = await this.driver.executeScript(
+                                'return arguments[0].parentElement',
+                                elements[0]
+                            );
+                            const isCustom = await this.isCustomSelectContainer(parent);
+
                             fields.unshift({
                                 type: 'username',
                                 selector,
                                 element: elements[0],
+                                isCustomSelect: isCustom,
+                                container: isCustom ? parent : undefined,
                             });
                             break;
                         }
@@ -102,6 +197,133 @@ export class LoginHandler {
         } catch (error) {
             console.error('[login-handler] Error finding login fields:', error);
             return fields;
+        }
+    }
+
+    /**
+     * Check if an element is a custom select/input container (React Select, Styled Select, etc.)
+     */
+    private async isCustomSelectContainer(element: any): Promise<boolean> {
+        if (!element) return false;
+
+        try {
+            const className = await element.getAttribute('class');
+            const role = await element.getAttribute('role');
+            const id = await element.getAttribute('id');
+
+            // Check for React Select patterns
+            if (className && className.includes('css-')) {
+                return true;
+            }
+
+            // Check for common custom select classes
+            if (className && /select|dropdown|combo|control/i.test(className)) {
+                return true;
+            }
+
+            // Check for ARIA roles indicating custom controls
+            if (role === 'combobox' || role === 'listbox' || role === 'searchbox') {
+                return true;
+            }
+
+            // Check for id patterns suggesting custom inputs
+            if (id && /username|password|email|select/i.test(id)) {
+                try {
+                    // Look for hidden input with visible display value pattern
+                    const hiddenInput = await element.findElements(
+                        By.css('input[type="text"][style*="opacity"]')
+                    );
+                    const displayValue = await element.findElements(
+                        By.css('[class*="value" i], [class*="singleValue" i], [class*="placeholder" i]')
+                    );
+
+                    if (hiddenInput.length > 0 && displayValue.length > 0) {
+                        return true;
+                    }
+                } catch (e) {
+                    // Continue
+                }
+            }
+
+            return false;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    /**
+     * Interact with a custom select component (React Select, etc.)
+     */
+    private async interactWithCustomSelect(container: any, value: string): Promise<void> {
+        try {
+            // Scroll container into view and click it to open dropdown
+            await this.driver.executeScript('arguments[0].scrollIntoView(true);', container);
+            await this.driver.sleep(200);
+
+            // Click the container to focus/open it
+            try {
+                await container.click();
+            } catch (e) {
+                // Try executing click via script if element.click() fails
+                await this.driver.executeScript('arguments[0].click();', container);
+            }
+
+            await this.driver.sleep(300);
+
+            // Find the input within the container and interact with it
+            try {
+                const inputs = await container.findElements(By.css('input[type="text"]'));
+                if (inputs.length > 0) {
+                    const input = inputs[0];
+
+                    // Clear any existing value
+                    try {
+                        await input.clear();
+                    } catch (e) {
+                        // Clear might fail on custom inputs, try sendKeys with Ctrl+A
+                        await input.sendKeys(Key.chord(Key.CONTROL, 'a'));
+                        await input.sendKeys(Key.DELETE);
+                    }
+
+                    // Send the value
+                    await input.sendKeys(value);
+                    await this.driver.sleep(200);
+
+                    // Try to find and click matching dropdown option
+                    try {
+                        // Look for options in dropdown that match the value
+                        const dropdownOptions = await this.driver.findElements(
+                            By.xpath(
+                                `//*[contains(@class, 'option') or @role='option'][contains(text(), '${value}')]`
+                            )
+                        );
+
+                        if (dropdownOptions.length > 0) {
+                            await dropdownOptions[0].click();
+                            await this.driver.sleep(200);
+                        } else {
+                            // If no exact match in dropdown, press Enter to confirm
+                            await input.sendKeys(Key.ENTER);
+                            await this.driver.sleep(200);
+                        }
+                    } catch (optionError) {
+                        // If we can't find the option, press Enter to confirm the input
+                        await input.sendKeys(Key.ENTER);
+                        await this.driver.sleep(200);
+                    }
+                }
+            } catch (inputError) {
+                console.error(
+                    '[login-handler] Could not interact with input inside custom select:',
+                    inputError
+                );
+                // Try sending keys directly to the container
+                await container.sendKeys(value);
+                await this.driver.sleep(200);
+            }
+        } catch (error) {
+            console.error('[login-handler] Error interacting with custom select:', error);
+            throw error;
         }
     }
 
@@ -166,15 +388,22 @@ export class LoginHandler {
             const usernameField = fields.find((f) => f.type === 'username');
             if (usernameField && usernameField.element) {
                 try {
-                    await usernameField.element.clear();
-                    await usernameField.element.sendKeys(username);
+                    if (usernameField.isCustomSelect && usernameField.container) {
+                        console.error('[login-handler] Detected custom select for username, using special handling');
+                        await this.interactWithCustomSelect(usernameField.container, username);
+                    } else {
+                        await usernameField.element.clear();
+                        await usernameField.element.sendKeys(username);
+                    }
                 } catch (fillError) {
                     console.error('[login-handler] Error filling username field:', fillError);
                     throw fillError;
                 }
             } else {
                 // If no specific username field, fill first text input before password
-                const allInputs = await this.driver.findElements(By.css('input[type="text"], input[type="email"], input:not([type="password"])'));
+                const allInputs = await this.driver.findElements(
+                    By.css('input[type="text"], input[type="email"], input:not([type="password"])')
+                );
                 if (allInputs && allInputs.length > 0) {
                     try {
                         await allInputs[0].clear();
@@ -192,8 +421,13 @@ export class LoginHandler {
             const passwordField = fields.find((f) => f.type === 'password');
             if (passwordField && passwordField.element) {
                 try {
-                    await passwordField.element.clear();
-                    await passwordField.element.sendKeys(password);
+                    if (passwordField.isCustomSelect && passwordField.container) {
+                        console.error('[login-handler] Detected custom select for password, using special handling');
+                        await this.interactWithCustomSelect(passwordField.container, password);
+                    } else {
+                        await passwordField.element.clear();
+                        await passwordField.element.sendKeys(password);
+                    }
                 } catch (fillError) {
                     console.error('[login-handler] Error filling password field:', fillError);
                     throw fillError;
