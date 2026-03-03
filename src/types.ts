@@ -86,6 +86,22 @@ export interface GeneratedTestCase {
     testCode?: string;
 }
 
+/** Performance metrics for DOM analysis */
+export interface AnalysisMetrics {
+    /** Device used for ML inference: webnn, webgpu, wasm, or none */
+    device: 'webnn' | 'webgpu' | 'wasm' | 'none';
+    /** Model load time in milliseconds */
+    modelLoadTime: number;
+    /** DOM analysis time in milliseconds */
+    analysisTime: number;
+    /** Embedding/deduplication time in milliseconds */
+    deduplicationTime: number;
+    /** Total number of elements analyzed */
+    elementsAnalyzed: number;
+    /** Number of high-intent elements after clustering */
+    elementsClustered: number;
+}
+
 /** Full output produced by the analyzer. */
 export interface AnalysisResult {
     url: string;
@@ -95,6 +111,8 @@ export interface AnalysisResult {
     consoleLogs: string[];
     /** Fallback: All navigation links found on page (href targets) */
     allNavigationLinks?: string[];
+    /** Performance and device metrics for this analysis */
+    metrics?: AnalysisMetrics;
 }
 
 /** Result of executing a single test */
@@ -245,6 +263,15 @@ export interface MultiPageCrawlConfig {
     enableWorkflowCaching?: boolean;
     /** Enable memory optimizations (default: true) */
     enableMemoryOptimization?: boolean;
+    /** Credentials for login automation (optional) */
+    credentials?: {
+        /** Username or email for login */
+        username: string;
+        /** Password for login */
+        password: string;
+    };
+    /** Enable automatic login form detection and filling (default: true) */
+    enableAutoLogin?: boolean;
 }
 
 /** Cache entry for workflow detection results */

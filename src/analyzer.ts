@@ -1,5 +1,5 @@
 import { pipeline, FeatureExtractionPipeline } from "@huggingface/transformers";
-import { AnalysisResult, HighIntentElement } from "./types.js";
+import { AnalysisResult, AnalysisMetrics, HighIntentElement } from "./types.js";
 import { TestCaseGenerator } from "./test-case-generator.js";
 
 // ---------------------------------------------------------------------------
@@ -20,7 +20,7 @@ export interface DomElement {
   children?: DomElement[];
 }
 
-export { AnalysisResult, HighIntentElement } from "./types.js";
+export { AnalysisResult, AnalysisMetrics, HighIntentElement } from "./types.js";
 
 /**
  * DomAnalyzer uses a local Transformers.js model (feature-extraction /
@@ -33,38 +33,144 @@ export { AnalysisResult, HighIntentElement } from "./types.js";
  */
 export class DomAnalyzer {
   private extractor: FeatureExtractionPipeline | null = null;
+  private device: 'webnn' | 'webgpu' | 'wasm' | 'none' = 'none';
+  private modelLoadTime: number = 0;
+
+  // PHASE 2 OPTIMIZATION: Static model cache across analyzer instances
+  // Prevents reload penalty on multi-page crawls (10+ pages)
+  private static globalModelCache: FeatureExtractionPipeline | null = null;
+  private static modelLoadPromise: Promise<void> | null = null;
+  private static globalDevice: 'webnn' | 'webgpu' | 'wasm' | 'none' = 'none';
+  private static globalModelLoadTime: number = 0;
+
+  /**
+   * Check if WebNN is supported in the current browser environment.
+   * Prevents timeouts by detecting unavailable devices early.
+   */
+  private async isWebNNSupported(): Promise<boolean> {
+    if (typeof navigator === "undefined" || !('ml' in navigator)) {
+      console.log('[analyzer] WebNN not available (navigator.ml missing)');
+      return false;
+    }
+    try {
+      const context = await (navigator as any).ml.createContext();
+      await context?.close?.();
+      console.log('[analyzer] ✓ WebNN supported and available');
+      return true;
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      console.log(`[analyzer] WebNN not supported: ${errorMsg}`);
+      return false;
+    }
+  }
 
   /** Pre-load the embedding model so the first analysis call is fast. */
   async init(): Promise<void> {
     if (typeof window === "undefined") {
       throw new Error("[analyzer] This module must run in a browser environment.");
     }
-    // Try WebNN → WebGPU → WASM (CPU) in order of preference.
-    for (const device of ["webnn", "webgpu", "wasm"] as const) {
+
+    // PHASE 2 OPTIMIZATION: Reuse cached model if available
+    if (DomAnalyzer.globalModelCache) {
+      this.extractor = DomAnalyzer.globalModelCache;
+      this.device = DomAnalyzer.globalDevice;
+      this.modelLoadTime = DomAnalyzer.globalModelLoadTime;
+      console.log('[analyzer] ✓ Using cached model (reuse across instances)');
+      return;
+    }
+
+    // PHASE 2 OPTIMIZATION: Wait for concurrent init calls to complete
+    if (DomAnalyzer.modelLoadPromise) {
+      await DomAnalyzer.modelLoadPromise;
+      this.extractor = DomAnalyzer.globalModelCache!;
+      this.device = DomAnalyzer.globalDevice;
+      this.modelLoadTime = DomAnalyzer.globalModelLoadTime;
+      console.log('[analyzer] ✓ Using model loaded by concurrent init');
+      return;
+    }
+
+    // Start loading model and cache the promise
+    DomAnalyzer.modelLoadPromise = this.loadAndCacheModel();
+    await DomAnalyzer.modelLoadPromise;
+    this.extractor = DomAnalyzer.globalModelCache!;
+    this.device = DomAnalyzer.globalDevice;
+    this.modelLoadTime = DomAnalyzer.globalModelLoadTime;
+  }
+
+  private async loadAndCacheModel(): Promise<void> {
+    const initStartTime = performance.now();
+    
+    // Check WebNN support first to avoid timeout delays
+    const webnnSupported = await this.isWebNNSupported();
+    
+    // Try devices in order of preference, skip WebNN if not supported
+    const devices = webnnSupported
+      ? (["webnn", "webgpu", "wasm"] as const)
+      : (["webgpu", "wasm"] as const);
+    
+    for (const device of devices) {
       try {
-        this.extractor = (await pipeline(
+        // PHASE 2 OPTIMIZATION: Advanced pipeline options
+        // float16: Reduce GPU memory usage
+        // quantized: Use quantized model for faster inference
+        DomAnalyzer.globalModelCache = (await pipeline(
           "feature-extraction",
           "Xenova/all-MiniLM-L6-v2",
-          { device }
+          {
+            device,
+            dtype: device === 'wasm' ? 'float32' : 'float16', // float16 on GPU, float32 on CPU
+            quantized: true, // Use quantized models when available
+          }
         )) as FeatureExtractionPipeline;
-        console.log(`[analyzer] Model loaded on device: ${device}`);
+        DomAnalyzer.globalDevice = device;
+        DomAnalyzer.globalModelLoadTime = performance.now() - initStartTime;
+        console.log(`[analyzer] ✓ Model loaded on device: ${device} (${DomAnalyzer.globalModelLoadTime.toFixed(0)}ms)`);
         return;
-      } catch {
+      } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
         console.warn(
-          `[analyzer] Device '${device}' unavailable, trying next…`
+          `[analyzer] ✗ Failed to load on '${device}': ${errorMsg}. Trying next…`
         );
       }
     }
-    console.warn("[analyzer] All ML backends unavailable — running in heuristic-only mode.");
+    
+    DomAnalyzer.globalDevice = 'none';
+    DomAnalyzer.globalModelLoadTime = performance.now() - initStartTime;
+    console.warn(
+      `[analyzer] ✗ All ML backends unavailable — running in heuristic-only mode (${DomAnalyzer.globalModelLoadTime.toFixed(0)}ms)`
+    );
   }
 
-  async analyzeCurrentPage(intentThreshold: number = 25): Promise<AnalysisResult> {
+  /**
+   * Clear the global model cache (useful for memory cleanup, tests, or switching backends).
+   * Call this when you know you're done with the analyzer for a while.
+   */
+  static clearModelCache(): void {
+    DomAnalyzer.globalModelCache = null;
+    DomAnalyzer.modelLoadPromise = null;
+    DomAnalyzer.globalDevice = 'none';
+    DomAnalyzer.globalModelLoadTime = 0;
+    console.log('[analyzer] Model cache cleared');
+  }
+
+  async analyzeCurrentPage(
+    intentThreshold: number = 25,
+    maxBatchSize: number = 50
+  ): Promise<AnalysisResult> {
+    const overallStartTime = performance.now();
+    
+    // DOM extraction
+    const domStartTime = performance.now();
     const dom = extractDom(10);
     const highIntentElements: HighIntentElement[] = [];
     this.collectHighIntentElements(dom, "", highIntentElements, intentThreshold);
+    const analysisTime = performance.now() - domStartTime;
+    const elementsAnalyzed = dom.length;
 
     // ML deduplication (if model available) or fallback to description dedup
+    const dedupStartTime = performance.now();
     let deduped: HighIntentElement[] = [];
+    
     if (!this.extractor) {
       const seen = new Set<string>();
       for (const el of highIntentElements) {
@@ -77,12 +183,34 @@ export class DomAnalyzer {
     } else {
       // Use ML model to deduplicate by semantic similarity
       const descriptions = highIntentElements.map((el) => elementDescription(el));
+      
       const embeddings: number[][] = [];
-      for (const desc of descriptions) {
-        // @ts-ignore: extractor returns Promise<number[][]>
-        const emb = await this.extractor(desc);
-        embeddings.push(Array.isArray(emb[0]) ? emb[0][0] : emb[0]);
+      
+      // PHASE 2 OPTIMIZATION: GPU memory management with batching
+      // For large DOMs (100+ elements), process in batches to prevent OOM
+      if (descriptions.length > maxBatchSize) {
+        console.log(
+          `[analyzer] Processing ${descriptions.length} embeddings in batches of ${maxBatchSize}`
+        );
+        for (let i = 0; i < descriptions.length; i += maxBatchSize) {
+          const batch = descriptions.slice(i, i + maxBatchSize);
+          const batchResults = await Promise.all(
+            batch.map(desc => this.extractor!(desc))
+          );
+          batchResults.forEach(result => {
+            embeddings.push(Array.isArray(result[0]) ? result[0][0] : result[0]);
+          });
+        }
+      } else {
+        // Original parallel processing for smaller DOMs
+        const embeddingResults = await Promise.all(
+          descriptions.map(desc => this.extractor!(desc))
+        );
+        embeddingResults.forEach(result => {
+          embeddings.push(Array.isArray(result[0]) ? result[0][0] : result[0]);
+        });
       }
+      
       const used = new Array(highIntentElements.length).fill(false);
       const threshold = 0.92;
       for (let i = 0; i < highIntentElements.length; ++i) {
@@ -97,11 +225,15 @@ export class DomAnalyzer {
         }
       }
     }
+    
+    const deduplicationTime = performance.now() - dedupStartTime;
     deduped.sort((a, b) => b.intentScore - a.intentScore);
 
     // Extract all navigation links for fallback crawling
     const allNavLinks = new Set<string>();
-    const allElements = document.querySelectorAll('a[href], form[action], [onclick]');
+    const allElements = document.querySelectorAll('a[href], form[action], [onclick], button, [role="button"]');
+    const navigationKeywords = ["sign in", "login", "log in", "get started", "start now", "register", "signup", "sign up", "submit", "next", "continue"];
+    
     for (const el of allElements) {
       let href: string | undefined;
       if (el.tagName === 'A') {
@@ -112,11 +244,36 @@ export class DomAnalyzer {
       } else if (el.tagName === 'FORM') {
         href = (el as HTMLFormElement).action;
         if (href) allNavLinks.add(href);
+      } else if (el.tagName === 'BUTTON' || (el as any).role === 'button') {
+        // For buttons, check data attributes first
+        const dataHref = (el as any)['data-href'] || (el as any)['data-link'] || (el as any)['data-url'] || (el as any)['data-route'];
+        if (dataHref && typeof dataHref === 'string' && !dataHref.startsWith('#')) {
+          allNavLinks.add(dataHref);
+        }
+        
+        // For buttons without explicit targets, mark that they're navigable
+        // This is a placeholder that will be captured when the button is clicked
+        const btnText = ((el.textContent || el.innerText || '') as string).toLowerCase().trim();
+        if (navigationKeywords.some(kw => btnText.includes(kw))) {
+          // Use a special URL pattern to indicate this button should be clicked and tracked
+          const btnId = (el as any).id || (el as any).getAttribute('aria-label') || btnText.replace(/\s+/g, '-');
+          allNavLinks.add(`__button__:${btnId}`);
+        }
       }
     }
 
     // Generate test cases from high-intent elements
     const testCases = TestCaseGenerator.generate(deduped, document.title);
+
+    // PHASE 1 OPTIMIZATION: Performance metrics
+    const metrics: AnalysisMetrics = {
+      device: this.device,
+      modelLoadTime: this.modelLoadTime,
+      analysisTime,
+      deduplicationTime,
+      elementsAnalyzed,
+      elementsClustered: deduped.length,
+    };
 
     return {
       url: window.location.href,
@@ -124,7 +281,8 @@ export class DomAnalyzer {
       highIntentElements: deduped,
       generatedTestCases: testCases,
       consoleLogs: [],
-      allNavigationLinks: Array.from(allNavLinks)
+      allNavigationLinks: Array.from(allNavLinks),
+      metrics,
     };
   }
 
@@ -244,6 +402,41 @@ export class DomAnalyzer {
         navigates = true;
         intentScore += 20; // Boost score for submit buttons
         reasons.push("submit button in form");
+      }
+      
+      // Enhanced button navigation detection for SPA/modern apps
+      if (tag === "button" || role === "button") {
+        // Check for data attributes indicating navigation
+        for (const [key, value] of Object.entries(el.attributes || {})) {
+          if (key.startsWith("data-") && (key.includes("href") || key.includes("link") || key.includes("route") || key.includes("url"))) {
+            if (value && typeof value === "string" && !value.startsWith("#")) {
+              navigates = true;
+              navigationTarget = value;
+              intentScore += 15; // Moderate boost for data-href style navigation
+              reasons.push(`button likely navigates (${key}="${value}")`);
+              break;
+            }
+          }
+        }
+        
+        // If button has onclick attribute, mark as navigative interactive
+        if (!navigationTarget && el.attributes?.onclick) {
+          navigates = true;
+          intentScore += 10; // Slight boost for onclick handlers
+          reasons.push("button with onclick handler");
+        }
+        
+        // Buttons with semantic navigation text without explicit target should still navigate
+        // This allows clicking to capture the actual URL
+        if (!navigationTarget && (el.text || el.ariaLabel)) {
+          const btnText = (el.text || el.ariaLabel || "").toLowerCase();
+          const navigationKeywords = ["sign in", "login", "log in", "get started", "start now", "register", "signup", "sign up", "submit"];
+          if (navigationKeywords.some(kw => btnText.includes(kw))) {
+            navigates = true;
+            intentScore += 12; // Moderate boost for semantic navigation buttons
+            reasons.push(`button text suggests navigation: "${el.text}"`);
+          }
+        }
       }
 
       // Only include if above threshold

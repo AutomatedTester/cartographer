@@ -107,4 +107,9 @@ export class SiteCrawler {
       this.driver = null;
     }
   }
+
+  /** Get the underlying WebDriver instance for advanced operations */
+  getDriver(): WebDriver | null {
+    return this.driver;
+  }
 }

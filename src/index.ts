@@ -83,6 +83,11 @@ const CrawlMultiPageInput = z.object({
   maxDepth: z.number().int().min(1).max(5).optional().default(3),
   detectWorkflows: z.boolean().optional().default(true),
   workflowStrategy: z.enum(["heuristic", "ml-based", "both"]).optional().default("both"),
+  enableAutoLogin: z.boolean().optional().default(true),
+  credentials: z.object({
+    username: z.string().min(1, { message: "Username is required." }),
+    password: z.string().min(1, { message: "Password is required." }),
+  }).optional(),
   format: z.enum(["json", "markdown"]).optional().default("json"),
 });
 
@@ -179,7 +184,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "crawl_multi_page",
       description:
-        "Crawl multiple pages of a website starting from a URL, detect user workflows (e.g., checkout, registration, login flows), and return a complete session with discovered workflows.",
+        "Crawl multiple pages of a website starting from a URL, detect user workflows (e.g., checkout, registration, login flows), and automatically handle login forms if credentials are provided.",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -211,6 +216,26 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             enum: ["heuristic", "ml-based", "both"],
             description: "Workflow detection strategy: 'heuristic' (pattern-based), 'ml-based' (semantic), or 'both' (default: both).",
             default: "both",
+          },
+          enableAutoLogin: {
+            type: "boolean",
+            description: "Enable automatic login form detection and filling (default: true). Requires credentials to be provided.",
+            default: true,
+          },
+          credentials: {
+            type: "object",
+            description: "Login credentials for sites behind authentication. When provided, crawler will auto-detect login forms and authenticate before crawling protected pages.",
+            properties: {
+              username: {
+                type: "string",
+                description: "Username or email for login.",
+              },
+              password: {
+                type: "string",
+                description: "Password for login.",
+              },
+            },
+            required: ["username", "password"],
           },
           format: {
             type: "string",
@@ -418,7 +443,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   if (name === "crawl_multi_page") {
-    const { startUrl, maxPages, maxDepth, detectWorkflows, workflowStrategy, format } = CrawlMultiPageInput.parse(args);
+    const { startUrl, maxPages, maxDepth, detectWorkflows, workflowStrategy, enableAutoLogin, credentials, format } = CrawlMultiPageInput.parse(args);
 
     try {
       const crawler = new MultiPageCrawler({
@@ -427,7 +452,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         maxDepth,
         detectWorkflows,
         workflowStrategy,
+        enableAutoLogin,
+        credentials,
       });
+
+      // If credentials provided, store them in session state for login handler
+      if (credentials) {
+        const session = (crawler as any)['sessionManager'];
+        session.updateState('username', credentials.username);
+        session.updateState('password', credentials.password);
+        console.error(`[index] Credentials stored in session for auto-login`);
+      }
+
       const result = await crawler.crawl();
 
       // Store the session for later retrieval

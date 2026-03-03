@@ -240,6 +240,74 @@ export class WorkflowDetector {
     }
 
     /**
+     * Check if a page is a login form page and extract login field information
+     */
+    static isLoginFormPage(page: CrawledPage): {
+        isLoginPage: boolean;
+        hasUsernameField: boolean;
+        hasPasswordField: boolean;
+        hasSubmitButton: boolean;
+        confidence: number;
+    } {
+        // Check URL patterns
+        const isLoginUrl =
+            page.url.includes('/login') ||
+            page.url.includes('/signin') ||
+            page.url.includes('/auth');
+
+        // Check for password input
+        const hasPasswordField = page.highIntentElements.some(
+            (el) => el.tag === 'input' && el.attributes?.type === 'password'
+        );
+
+        // Check for username/email input
+        const hasUsernameField = page.highIntentElements.some((el) => {
+            if (el.tag !== 'input') return false;
+            const type = el.attributes?.type || '';
+            const name = el.attributes?.name || '';
+            const id = el.attributes?.id || '';
+            const placeholder = el.attributes?.placeholder || '';
+            return (
+                type === 'email' ||
+                type === 'text' ||
+                name.includes('user') ||
+                name.includes('email') ||
+                id.includes('user') ||
+                id.includes('email') ||
+                placeholder.toLowerCase().includes('user') ||
+                placeholder.toLowerCase().includes('email')
+            );
+        });
+
+        // Check for submit button
+        const hasSubmitButton = page.highIntentElements.some(
+            (el) =>
+                (el.tag === 'button' || el.tag === 'input') &&
+                (el.attributes?.type === 'submit' ||
+                    (el.text || '').toLowerCase().includes('login') ||
+                    (el.text || '').toLowerCase().includes('sign in') ||
+                    (el.ariaLabel || '').toLowerCase().includes('login'))
+        );
+
+        // Calculate confidence score
+        let confidence = 0;
+        if (isLoginUrl) confidence += 40;
+        if (hasPasswordField) confidence += 30;
+        if (hasUsernameField) confidence += 20;
+        if (hasSubmitButton) confidence += 10;
+
+        const isLoginPage = confidence >= 50 && hasPasswordField;
+
+        return {
+            isLoginPage,
+            hasUsernameField,
+            hasPasswordField,
+            hasSubmitButton,
+            confidence,
+        };
+    }
+
+    /**
      * Detect navigation patterns
      */
     private static detectNavigationPatterns(session: CrawlSession): DetectedWorkflow[] {

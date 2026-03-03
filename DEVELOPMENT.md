@@ -149,6 +149,13 @@ package.json            # Project metadata, scripts, dependencies
 
 - [src/markdown-exporter.ts](src/markdown-exporter.ts) – Formats results
 
+**Multi-Page Crawling & Workflows:**
+
+- [src/multi-page-crawler.ts](src/multi-page-crawler.ts) – BFS crawling engine with concurrency control
+- [src/session-manager.ts](src/session-manager.ts) – State tracking across pages, visited URL tracking
+- [src/workflow-detector.ts](src/workflow-detector.ts) – Detects user workflows (auth flows, form submissions, multi-step processes)
+- [src/login-handler.ts](src/login-handler.ts) – Login form automation (form filling, submission, success validation)
+
 **Types:**
 
 - [src/types.ts](src/types.ts) – Shared interfaces (Node.js + browser compatible)
@@ -390,30 +397,58 @@ navigator.webmcp.tools.search = async (params) => {
 };
 ```
 
-#### 6. **MarkdownExporter** (markdown-exporter.ts)
+#### 7. **MultiPageCrawler & LoginHandler** (multi-page-crawler.ts, login-handler.ts)
 
-Exports in three formats:
+For sites that require authentication, the multi-page crawler includes automatic login support:
 
-- **JSON**: Raw structured data
+```
+MultiPageCrawler.crawl()
+    ↓
+BFS Queue: [{ url, depth }]
+    ↓
+For each URL:
+    ├─ SiteCrawler.crawlAndAnalyze(url)  // Analyze page
+    ├─ Add page to session
+    ├─ Check if login form detected
+    │   └─ If yes + credentials available:
+    │       ├─ LoginHandler.findLoginFields()     // Find username/password fields
+    │       ├─ LoginHandler.fillLoginForm()       // Fill with credentials from session
+    │       ├─ LoginHandler.submitForm()          // Click submit or call form.submit()
+    │       ├─ LoginHandler.waitForPageLoad()     // Wait for page to load
+    │       └─ LoginHandler.validateLoginSuccess() // Check URL change + HTML indicators
+    │           └─ Update session state (success/failure)
+    ├─ Extract navigation targets from page
+    └─ Queue unvisited links for next iteration
+    ↓
+Return MultiPageCrawlResult with all pages, workflows, metadata
+```
 
-  ```json
-  {
-    "testCases": [...],
-    "semanticTools": [...],
-    "metadata": {...}
-  }
-  ```
+**Key Classes:**
 
-- **Full Markdown**: Complete report with tables, code blocks
+**WorkflowDetector** (workflow-detector.ts)
 
-  ```markdown
-  # Crawl Report
-  ## Test Cases
-  | ID | Element | Action | Priority |
-  ...
-  ```
+- `detect()`: Main entry point calling heuristic and ML-based detection
+- `detectAuthFlows()`: Identifies login→dashboard sequences
+- `isLoginFormPage()`: Checks if a page is a login form (90+ confidence)
+- `detectFormSubmissionFlows()`: Identifies form → success patterns
+- `detectMultiStepForms()`: Identifies multi-step form sequences
 
-- **Summary Markdown**: High-level overview with key metrics
+**LoginHandler** (login-handler.ts)
+
+- `findLoginFields()`: Locates username/email and password inputs
+- `findSubmitButton()`: Locates form submit button
+- `fillLoginForm(username, password)`: Fills form fields with credentials
+- `submitForm()`: Sends form data (via click or JavaScript)
+- `waitForPageLoad(timeout)`: Waits for page to stabilize after submission
+- `validateLoginSuccess(originalUrl)`: Confirms login via URL change + HTML indicators
+- `performLogin()`: Complete flow: fill → submit → validate
+
+**SessionManager** (session-manager.ts)
+
+- `updateState(key, value)`: Store credentials before crawl or results after
+- `getState()`: Retrieve session state
+- `addPage()`: Track crawled pages
+- `recordNavigation()`: Track navigation graph
 
 ---
 

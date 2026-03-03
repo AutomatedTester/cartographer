@@ -596,6 +596,200 @@ curl -X POST http://localhost:3000/tools/crawl_and_analyze \
 pandoc test-report.md -o test-report.pdf
 ```
 
+### Example 5: Multi-Page Crawling with Login Automation
+
+Crawl multiple pages including those behind a login form.
+
+#### Setup: Store Credentials in Session
+
+```javascript
+import { MultiPageCrawler } from 'friendly-octo-train';
+
+// Create crawler configuration
+const config = {
+  startUrl: 'https://protected-site.com',
+  maxPages: 20,           // Crawl up to 20 pages
+  maxDepth: 3,            // Max 3 levels deep
+  enableAutoLogin: true,  // Enable automatic login detection (default: true)
+};
+
+// Create crawler instance
+const crawler = new MultiPageCrawler(config);
+
+// Access internal session manager and store credentials
+// (These will be used when a login form is detected)
+const session = crawler['sessionManager'];
+session.updateState('username', process.env.LOGIN_USER || 'testuser@example.com');
+session.updateState('password', process.env.LOGIN_PASS || 'testpassword123');
+
+// Start crawling - LoginHandler will automatically:
+// 1. Detect login forms
+// 2. Fill username/password fields from session state
+// 3. Click submit button
+// 4. Validate login success (URL change + HTML indicators)
+// 5. Continue crawling pages behind the login
+const result = await crawler.crawl();
+
+console.log('Crawl Results:');
+console.log(`- Total pages crawled: ${result.summary.pagesVisited}`);
+console.log(`- High-intent elements: ${result.summary.highIntentElements}`);
+console.log(`- Workflows detected: ${result.summary.workflowsDetected}`);
+
+// Check login success in session state
+const finalState = result.session.sessionState;
+if (finalState.lastLoginSuccess) {
+  console.log(`✓ Login successful at ${new Date(finalState.lastLoginSuccess)}`);
+} else if (finalState.lastLoginFailure) {
+  console.log(`✗ Login failed: ${finalState.lastLoginFailure.reason}`);
+}
+```
+
+#### How Login Automation Works
+
+1. **Detection**: When the crawler encounters a page with:
+   - URL patterns like `/login`, `/signin`, `/auth`
+   - Both username/email and password input fields
+   - A submit button
+
+   The `WorkflowDetector.isLoginFormPage()` method identifies it as a login form.
+
+2. **Form Filling**: The `LoginHandler` fills the form with credentials from session state:
+   - Finds username/email input field
+   - Finds password input field
+   - Enters credentials
+
+3. **Submission**: Clicks the submit button and waits for page load:
+   - Handles form submit via click or JavaScript
+   - Waits for page to load and stabilize (up to `pageLoadTimeout`)
+
+4. **Validation**: Confirms login success using multiple indicators:
+   - **URL change**: Page redirected away from login URL
+   - **Logout button**: Presence of logout/sign-out link/button
+   - **User profile**: Presence of user menu or profile element
+   - **Login form gone**: Login form no longer visible on page
+
+   If any of these indicators are positive, login is considered successful.
+
+5. **Continuation**: After successful login, the crawler continues with the next pages:
+   - Crawler now has an authenticated session
+   - Can access pages normally behind login (dashboard, profile, etc.)
+   - Detected workflows include authentication flows
+
+#### Configuration Options
+
+```typescript
+interface MultiPageCrawlConfig {
+  // ... existing options ...
+
+  /** Enable automatic login form detection and filling (default: true) */
+  enableAutoLogin?: boolean;
+
+  /** Login credentials (optional - credentials can be set via session state) */
+  credentials?: {
+    username: string;
+    password: string;
+  };
+}
+```
+
+#### Session State Keys
+
+When login detection and filling occurs, the following keys are updated in session state:
+
+| Key | Value | Purpose |
+|-----|-------|---------|
+| `username` | string | Username/email for login (set by application) |
+| `password` | string | Password for login (set by application) |
+| `lastLoginSuccess` | timestamp | When login was successful (set by LoginHandler) |
+| `lastLoginFailure` | object | Details of failed login attempt |
+| `lastLoginError` | object | Error details if login threw exception |
+
+#### Environment Variables for Credentials
+
+For security, pass credentials via environment variables:
+
+```bash
+export LOGIN_USER=testuser@example.com
+export LOGIN_PASS=securepassword123
+node your-script.js
+```
+
+Then in code:
+
+```javascript
+session.updateState('username', process.env.LOGIN_USER);
+session.updateState('password', process.env.LOGIN_PASS);
+```
+
+#### Real-World Example: Testing Protected API Dashboard
+
+```javascript
+import { MultiPageCrawler } from 'friendly-octo-train';
+import fs from 'fs';
+
+async function auditProtectedDashboard() {
+  console.log('Starting audit of protected dashboard...');
+
+  const config = {
+    startUrl: 'https://api.example.com',  // Redirects to login
+    maxPages: 50,
+    maxDepth: 4,
+    enableAutoLogin: true,
+    intentThreshold: 25,
+    detectWorkflows: true,
+  };
+
+  const crawler = new MultiPageCrawler(config);
+
+  // Set credentials from environment
+  const session = crawler['sessionManager'];
+  session.updateState('username', process.env.DASHBOARD_USER);
+  session.updateState('password', process.env.DASHBOARD_PASS);
+
+  // Run crawl
+  const result = await crawler.crawl();
+
+  // Analyze results
+  const authWorkflows = result.session.workflows.filter(w =>
+    w.tags.includes('authentication')
+  );
+
+  const pagesAfterLogin = result.session.pages.filter(p =>
+    p.url.includes('/dashboard') || p.url.includes('/profile')
+  );
+
+  console.log(`\nAudit Summary:`);
+  console.log(`- Pages crawled: ${result.summary.pagesVisited}`);
+  console.log(`- Pages after login: ${pagesAfterLogin.length}`);
+  console.log(`- Auth workflows detected: ${authWorkflows.length}`);
+  console.log(`- Total high-intent elements: ${result.summary.highIntentElements}`);
+
+  // Save full report
+  fs.writeFileSync(
+    'dashboard-audit-report.json',
+    JSON.stringify(result, null, 2)
+  );
+
+  console.log('✓ Full report saved to dashboard-audit-report.json');
+}
+
+auditProtectedDashboard().catch(console.error);
+```
+
+#### Disabling Auto-Login
+
+If you want to crawl only the login page without auto-login:
+
+```javascript
+const config = {
+  startUrl: 'https://protected-site.com/login',
+  enableAutoLogin: false,  // Disable automatic login
+};
+
+const crawler = new MultiPageCrawler(config);
+const result = await crawler.crawl();
+```
+
 ---
 
 ## Output Formats
