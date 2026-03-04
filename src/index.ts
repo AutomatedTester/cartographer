@@ -26,6 +26,7 @@ import { MultiPageCrawler } from "./multi-page-crawler.js";
 import { SessionManager } from "./session-manager.js";
 import { WorkflowDetector } from "./workflow-detector.js";
 import { LocatorGenerator } from "./locator-generator.js";
+import { BrowserAnalysisPipeline } from "./browser-pipeline.js";
 
 // ---------------------------------------------------------------------------
 // Helper Functions
@@ -49,6 +50,9 @@ function normalizeUrl(url: string): string {
 // ---------------------------------------------------------------------------
 
 const crawler = new SiteCrawler();
+
+/** Browser-based analysis pipeline for Phase 2 optimization */
+const browserPipeline = new BrowserAnalysisPipeline();
 
 /** Most-recent analysis result, used by get_element_locator. */
 let lastAnalysis: AnalysisResult | null = null;

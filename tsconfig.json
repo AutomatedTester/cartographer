@@ -29,6 +29,10 @@
     "src/session-manager.ts",
     "src/multi-page-crawler.ts",
     "src/workflow-detector.ts",
+    "src/embedding-cache.ts",
+    "src/heuristic-scorer.ts",
+    "src/locator-generator.ts",
+    "src/browser-pipeline.ts",
     "src/index.ts"
   ],
   "exclude": [
