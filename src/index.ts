@@ -24,7 +24,8 @@ import { TestExecutor } from "./test-executor.js";
 import { SemanticToolGenerator } from "./webmcp-semantic-tools.js";
 import { MultiPageCrawler } from "./multi-page-crawler.js";
 import { SessionManager } from "./session-manager.js";
-import { WorkflowDetector } from "./workflow-detector.js"
+import { WorkflowDetector } from "./workflow-detector.js";
+import { LocatorGenerator } from "./locator-generator.js";
 
 // ---------------------------------------------------------------------------
 // Helper Functions
@@ -347,18 +348,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    // Use highIntentElements instead of priorityTestList
-    const best = findBestCandidate(
-      lastAnalysis.highIntentElements ?? [],
-      description
-    );
+    // PHASE 1 OPTIMIZATION: Use heuristic-based locator generation (no Copilot!)
+    // Convert DomElements to the format needed by LocatorGenerator
+    const allElements = lastAnalysis.highIntentElements ?? [];
+    const locatorGen = new LocatorGenerator();
+    const locator = locatorGen.generateLocator(description, allElements);
+
     return {
       content: [
         {
           type: "text" as const,
-          text: best
-            ? JSON.stringify(best, null, 2)
-            : `No matching element found for: "${description}"`,
+          text: `Locator: ${locator.selector}\nType: ${locator.type}\nConfidence: ${(locator.confidence * 100).toFixed(0)}%\nReason: ${locator.reason}`,
         },
       ],
     };

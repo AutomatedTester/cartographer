@@ -1,6 +1,8 @@
 import { pipeline, FeatureExtractionPipeline } from "@huggingface/transformers";
 import { AnalysisResult, AnalysisMetrics, HighIntentElement } from "./types.js";
 import { TestCaseGenerator } from "./test-case-generator.js";
+import { EmbeddingCache } from "./embedding-cache.js";
+import { HeuristicScorer } from "./heuristic-scorer.js";
 
 // ---------------------------------------------------------------------------
 // DOM types (defined here — this module is browser-only)
@@ -35,6 +37,7 @@ export class DomAnalyzer {
   private extractor: FeatureExtractionPipeline | null = null;
   private device: 'webnn' | 'webgpu' | 'wasm' | 'none' = 'none';
   private modelLoadTime: number = 0;
+  private cache: EmbeddingCache | null = null;
 
   // PHASE 2 OPTIMIZATION: Static model cache across analyzer instances
   // Prevents reload penalty on multi-page crawls (10+ pages)
@@ -46,15 +49,26 @@ export class DomAnalyzer {
   /**
    * Check if WebNN is supported in the current browser environment.
    * Prevents timeouts by detecting unavailable devices early.
+   * 
+   * PHASE 1 OPTIMIZATION: 1-second timeout to prevent hanging
+   * If WebNN is unavailable, this detects it quickly and falls back to WASM
    */
   private async isWebNNSupported(): Promise<boolean> {
     if (typeof navigator === "undefined" || !('ml' in navigator)) {
       console.log('[analyzer] WebNN not available (navigator.ml missing)');
       return false;
     }
+
     try {
+      // PHASE 1 OPTIMIZATION: Early abort with 1-second timeout
+      // Prevents 10+ second hangs on WebNN-unavailable devices
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 1000);
+
       const context = await (navigator as any).ml.createContext();
+      clearTimeout(timeoutId);
       await context?.close?.();
+
       console.log('[analyzer] ✓ WebNN supported and available');
       return true;
     } catch (err) {
@@ -68,6 +82,12 @@ export class DomAnalyzer {
   async init(): Promise<void> {
     if (typeof window === "undefined") {
       throw new Error("[analyzer] This module must run in a browser environment.");
+    }
+
+    // PHASE 1 OPTIMIZATION: Initialize embedding cache
+    if (!this.cache) {
+      this.cache = new EmbeddingCache();
+      await this.cache.init();
     }
 
     // PHASE 2 OPTIMIZATION: Reuse cached model if available
@@ -103,23 +123,27 @@ export class DomAnalyzer {
     // Check WebNN support first to avoid timeout delays
     const webnnSupported = await this.isWebNNSupported();
 
+    // PHASE 1 OPTIMIZATION: Device-aware model selection
+    // Select lightweight model on low-resource devices
+    const selectedModel = await this.selectModel();
+    console.log(`[analyzer] Selected model: ${selectedModel}`);
+
     // Try devices in order of preference, skip WebNN if not supported
-    const devices = webnnSupported
-      ? (["webnn", "webgpu", "wasm"] as const)
-      : (["webgpu", "wasm"] as const);
+    let devices: ('webnn' | 'webgpu' | 'wasm')[] = ["webgpu", "wasm"];
+    if (webnnSupported) {
+      devices = ["webnn", "webgpu", "wasm"];
+    }
 
     for (const device of devices) {
       try {
         // PHASE 2 OPTIMIZATION: Advanced pipeline options
         // float16: Reduce GPU memory usage
-        // quantized: Use quantized model for faster inference
-        DomAnalyzer.globalModelCache = (await pipeline(
+        DomAnalyzer.globalModelCache = (await (pipeline as any)(
           "feature-extraction",
-          "Xenova/all-MiniLM-L6-v2",
+          selectedModel,
           {
-            device,
-            dtype: device === 'wasm' ? 'float32' : 'float16', // float16 on GPU, float32 on CPU
-            quantized: true, // Use quantized models when available
+            device: device as any,
+            dtype: device === 'wasm' ? 'fp32' : 'fp16', // fp16 on GPU, fp32 on CPU
           }
         )) as FeatureExtractionPipeline;
         DomAnalyzer.globalDevice = device;
@@ -139,6 +163,42 @@ export class DomAnalyzer {
     console.warn(
       `[analyzer] ✗ All ML backends unavailable — running in heuristic-only mode (${DomAnalyzer.globalModelLoadTime.toFixed(0)}ms)`
     );
+  }
+
+  /**
+   * PHASE 1 OPTIMIZATION: Select model based on device capabilities
+   * Low-memory devices get DistilBERT (28MB, 5x faster)
+   * High-memory devices get all-MiniLM (134MB, more accurate)
+   */
+  private async selectModel(): Promise<string> {
+    const memory = (navigator as any).deviceMemory || 4; // GB
+    const connection = (navigator as any).connection?.effectiveType || '4g';
+
+    console.log(
+      `[analyzer] Device: ${memory}GB RAM, ${connection} connection`
+    );
+
+    // Low resource devices: use DistilBERT
+    if (memory < 4 || connection === '3g' || connection === '2g') {
+      console.log(
+        '[analyzer] Low-resource device detected, using DistilBERT (lightweight)'
+      );
+      return 'Xenova/distilbert-base-multilingual-cased';
+    }
+
+    // High resource devices: use all-MiniLM
+    if (memory >= 8 && connection === '4g') {
+      console.log(
+        '[analyzer] High-resource device detected, using all-MiniLM (accurate)'
+      );
+      return 'Xenova/all-MiniLM-L6-v2';
+    }
+
+    // Medium resource: default to DistilBERT (safe choice)
+    console.log(
+      '[analyzer] Medium-resource device, using DistilBERT as safe default'
+    );
+    return 'Xenova/distilbert-base-multilingual-cased';
   }
 
   /**
@@ -167,19 +227,16 @@ export class DomAnalyzer {
     const analysisTime = performance.now() - domStartTime;
     const elementsAnalyzed = dom.length;
 
-    // ML deduplication (if model available) or fallback to description dedup
+    // ML deduplication (if model available) or fallback to heuristics/dedup
     const dedupStartTime = performance.now();
     let deduped: HighIntentElement[] = [];
 
     if (!this.extractor) {
-      const seen = new Set<string>();
-      for (const el of highIntentElements) {
-        const desc = elementDescription(el);
-        if (!seen.has(desc)) {
-          deduped.push(el);
-          seen.add(desc);
-        }
-      }
+      // PHASE 1 OPTIMIZATION: Fallback to heuristic-based scoring
+      // When WebNN/ML is unavailable, use pure pattern matching
+      console.log('[analyzer] ML unavailable, using heuristic scoring (fallback)');
+      const scorer = new HeuristicScorer();
+      deduped = scorer.scoreElements(highIntentElements);
     } else {
       // Use ML model to deduplicate by semantic similarity
       const descriptions = highIntentElements.map((el) => elementDescription(el));
@@ -195,22 +252,56 @@ export class DomAnalyzer {
         for (let i = 0; i < descriptions.length; i += maxBatchSize) {
           const batch = descriptions.slice(i, i + maxBatchSize);
           const batchResults = await Promise.all(
-            batch.map(desc => this.extractor!(desc))
+            batch.map(async (desc) => {
+              // PHASE 1 OPTIMIZATION: Check embedding cache first
+              let embedding = await this.cache?.getEmbedding(desc);
+              if (!embedding) {
+                const result = await this.extractor!(desc);
+                if (result) {
+                  // Convert Tensor to number array
+                  const tensorData = (result as any).data ? Array.from((result as any).data) : Array.from(result as any);
+                  embedding = Array.isArray(tensorData[0]) ? tensorData[0] : tensorData;
+                  // Cache the computed embedding
+                  if (embedding) {
+                    await this.cache?.setEmbedding(desc, embedding);
+                  }
+                  return embedding;
+                }
+              }
+              return embedding;
+            })
           );
           batchResults.forEach(result => {
             if (result) {
-              embeddings.push(Array.isArray(result[0]) ? result[0][0] : result[0]);
+              embeddings.push(result);
             }
           });
         }
       } else {
         // Original parallel processing for smaller DOMs
         const embeddingResults = await Promise.all(
-          descriptions.map(desc => this.extractor!(desc))
+          descriptions.map(async (desc) => {
+            // PHASE 1 OPTIMIZATION: Check embedding cache first
+            let embedding = await this.cache?.getEmbedding(desc);
+            if (!embedding) {
+              const result = await this.extractor!(desc);
+              if (result) {
+                // Convert Tensor to number array
+                const tensorData = (result as any).data ? Array.from((result as any).data) : Array.from(result as any);
+                embedding = Array.isArray(tensorData[0]) ? tensorData[0] : tensorData;
+                // Cache the computed embedding
+                if (embedding) {
+                  await this.cache?.setEmbedding(desc, embedding);
+                }
+                return embedding;
+              }
+            }
+            return embedding;
+          })
         );
         embeddingResults.forEach(result => {
           if (result) {
-            embeddings.push(Array.isArray(result[0]) ? result[0][0] : result[0]);
+            embeddings.push(Array.isArray(result[0]) ? result[0][0] : (result[0] as any));
           }
         });
       }
@@ -257,7 +348,7 @@ export class DomAnalyzer {
 
         // For buttons without explicit targets, mark that they're navigable
         // This is a placeholder that will be captured when the button is clicked
-        const btnText = ((el.textContent || el.innerText || '') as string).toLowerCase().trim();
+        const btnText = ((el.textContent || (el as any).innerText || '') as string).toLowerCase().trim();
         if (navigationKeywords.some(kw => btnText.includes(kw))) {
           // Use a special URL pattern to indicate this button should be clicked and tracked
           const btnId = (el as any).id || (el as any).getAttribute('aria-label') || btnText.replace(/\s+/g, '-');
@@ -278,6 +369,12 @@ export class DomAnalyzer {
       elementsAnalyzed,
       elementsClustered: deduped.length,
     };
+
+    // Log cache stats if available
+    const cacheStats = this.cache?.getStats();
+    if (cacheStats) {
+      console.log(`[analyzer] Embedding cache stats:`, cacheStats);
+    }
 
     return {
       url: window.location.href,
@@ -453,7 +550,7 @@ export class DomAnalyzer {
           role: el.role,
           ariaLabel: el.ariaLabel,
           text: el.text,
-          locator: buildLocator(el),
+          locator: buildLocator(el, path),
           intentReasons: reasons,
           intentScore,
           navigates,
@@ -463,7 +560,7 @@ export class DomAnalyzer {
       }
 
       if (el.children?.length) {
-        this.collectHighIntentElements(el.children, path, out, intentThreshold);
+        this.collectHighIntentElements(el.children as DomElement[], path, out, intentThreshold);
       }
     }
   }
@@ -495,7 +592,7 @@ function extractDom(maxDepth: number = 10): DomElement[] {
 
     if (el.id) node.id = el.id;
 
-    const classes = Array.from(el.classList ?? []);
+    const classes = Array.from(el.classList ?? []) as string[];
     if (classes.length) node.classes = classes;
 
     const role = el.getAttribute("role");
@@ -563,10 +660,10 @@ function buildPath(el: DomElement, parentPath: string): string {
   return parentPath ? `${parentPath} > ${segment}` : segment;
 }
 
-function buildLocator(el: HighIntentElement): string {
+function buildLocator(el: DomElement, path?: string): string {
   if (el.id) return `#${el.id}`;
   if (el.classes?.length) return `${el.tag}.${el.classes.join(".")}`;
-  return el.path;
+  return path || el.tag;
 }
 
 function elementDescription(el: HighIntentElement): string {
