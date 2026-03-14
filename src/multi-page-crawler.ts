@@ -2,6 +2,7 @@ import { SiteCrawler } from './crawler.js';
 import { SessionManager } from './session-manager.js';
 import { LoginHandler } from './login-handler.js';
 import { WorkflowDetector } from './workflow-detector.js';
+import { JourneyInferenceEngine } from './journey-inference-engine.js';
 import {
     MultiPageCrawlConfig,
     MultiPageCrawlResult,
@@ -134,15 +135,24 @@ export class MultiPageCrawler {
             const session = await this.sessionManager.finalize();
             const totalTime = Date.now() - startTime;
 
+            // Infer user journeys from heuristic analysis
+            const inferredJourneys = JourneyInferenceEngine.inferJourneys(session);
+            session.inferredJourneys = inferredJourneys;
+
+            // Calculate estimated user journeys (formal detected + high-confidence inferred)
+            const detectedJourneyCount = session.workflows.filter((w) => w.confidence > 0.75).length;
+            const inferredJourneyCount = inferredJourneys.filter((j) => j.confidence > 0.7).length;
+
             return {
                 session,
                 detectedWorkflows: session.workflows,
+                inferredJourneys,
                 summary: {
                     pagesVisited: session.pages.length,
                     totalElements: session.pages.reduce((acc, p) => acc + (p && p.highIntentElements ? p.highIntentElements.length : 0), 0),
                     highIntentElements: session.metadata.totalHighIntentElements,
                     workflowsDetected: session.workflows.length,
-                    estimatedUserJourneys: session.workflows.filter((w) => w.confidence > 0.75).length,
+                    estimatedUserJourneys: detectedJourneyCount + inferredJourneyCount,
                 },
                 performance: {
                     totalTime,

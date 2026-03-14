@@ -308,12 +308,30 @@ export class DomAnalyzer {
 
       const used = new Array(highIntentElements.length).fill(false);
       const threshold = 0.92;
+      // PHASE 3 OPTIMIZATION: Selective deduplication by tag type
+      // Preserve all critical form/interaction elements even if semantically similar
+      // This prevents losing distinct form fields, buttons, and links across products/pages
+      const NON_DEDUP_TAGS = new Set(['input', 'button', 'a', 'textarea', 'select']);
+      
       for (let i = 0; i < highIntentElements.length; ++i) {
         if (used[i]) continue;
         deduped.push(highIntentElements[i]);
         used[i] = true;
+        
+        // Skip deduplication for critical element types
+        // Input/button/link elements should be preserved even if semantically similar
+        // because context matters (different products, different form fields, different destinations)
+        if (NON_DEDUP_TAGS.has(highIntentElements[i].tag)) {
+          console.log(`[analyzer] Skipping dedup for ${highIntentElements[i].tag} element (critical type)`);
+          continue;
+        }
+        
+        // Apply semantic deduplication only for other elements (divs, spans, containers, etc)
         for (let j = i + 1; j < highIntentElements.length; ++j) {
           if (used[j]) continue;
+          // Skip dedup for target if it's also a critical tag type
+          if (NON_DEDUP_TAGS.has(highIntentElements[j].tag)) continue;
+          
           if (cosineSimilarity(embeddings[i], embeddings[j]) > threshold) {
             used[j] = true;
           }
@@ -622,12 +640,24 @@ function extractDom(maxDepth: number = 10): DomElement[] {
       "required",
       "hidden",
       "value",
+      "onclick",
+      "data-href",
+      "data-link",
+      "data-url",
+      "data-route",
     ];
     node.attributes = {};
     for (const attr of attrNames) {
       const val = el.getAttribute(attr);
       if (val !== null) node.attributes[attr] = val;
     }
+    
+    // Also collect any other data-* attributes that might indicate navigation
+    Array.from(el.attributes || [])
+      .filter(attr => attr.name.startsWith('data-') && !node.attributes![attr.name])
+      .forEach(attr => {
+        node.attributes![attr.name] = attr.value;
+      });
 
     // Visibility detection (best effort)
     const style = window.getComputedStyle(el as Element);

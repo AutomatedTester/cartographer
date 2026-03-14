@@ -184,6 +184,16 @@ export interface CrawlSession {
     sessionState: Record<string, any>;
     /** Detected workflows through the website */
     workflows: DetectedWorkflow[];
+    /** Inferred user journeys from heuristic analysis */
+    inferredJourneys?: Array<{
+        id: string;
+        name: string;
+        description: string;
+        pageSequence: string[];
+        elementPatterns: string[];
+        confidence: number;
+        tags: string[];
+    }>;
 }
 
 /** A single action within a workflow */
@@ -292,6 +302,16 @@ export interface MultiPageCrawlResult {
     session: CrawlSession;
     /** Detected workflows */
     detectedWorkflows: DetectedWorkflow[];
+    /** Inferred user journeys */
+    inferredJourneys?: Array<{
+        id: string;
+        name: string;
+        description: string;
+        pageSequence: string[];
+        elementPatterns: string[];
+        confidence: number;
+        tags: string[];
+    }>;
     /** Summary statistics */
     summary: {
         pagesVisited: number;

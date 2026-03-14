@@ -85,6 +85,18 @@ import { MultiPageCrawler } from '../build/multi-page-crawler.js';
                     console.log(`  - ${wf.name} (confidence: ${Math.round(wf.confidence)}%)`);
                 }
             }
+
+            if (result.inferredJourneys && result.inferredJourneys.length > 0) {
+                console.log(`\n✨ Inferred User Journeys:`);
+                console.log(`  Found ${result.inferredJourneys.length} journeys:`);
+                for (const journey of result.inferredJourneys) {
+                    console.log(`\n  📌 ${journey.name}`);
+                    console.log(`     Description: ${journey.description}`);
+                    console.log(`     Confidence: ${journey.confidence}%`);
+                    console.log(`     Pages: ${journey.pageSequence.length}`);
+                    console.log(`     Tags: ${journey.tags.join(", ")}`);
+                }
+            }
         } catch (error) {
             console.error(`\n❌ ERROR:`, error instanceof Error ? error.message : error);
             console.error('\nFull error:');

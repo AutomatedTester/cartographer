@@ -687,7 +687,7 @@ function formatTestResultsMarkdown(summary: TestExecutionSummary): string {
 }
 
 function formatMultiPageCrawlMarkdown(result: MultiPageCrawlResult, sessionId: string): string {
-  const { session, detectedWorkflows, summary } = result;
+  const { session, detectedWorkflows, inferredJourneys, summary } = result;
 
   let markdown = `# Multi-Page Crawl Results\n\n`;
   markdown += `**Session ID:** \`${sessionId}\`\n`;
@@ -710,6 +710,18 @@ function formatMultiPageCrawlMarkdown(result: MultiPageCrawlResult, sessionId: s
       markdown += `- **Confidence:** ${workflow.confidence}%\n`;
       markdown += `- **Pages:** ${workflow.pageSequence.length}\n`;
       markdown += `- **Tags:** ${workflow.tags.join(", ")}\n\n`;
+    }
+  }
+
+  if (inferredJourneys && inferredJourneys.length > 0) {
+    markdown += `## Inferred User Journeys\n\n`;
+    for (const journey of inferredJourneys) {
+      markdown += `### ${journey.name}\n`;
+      markdown += `- **Description:** ${journey.description}\n`;
+      markdown += `- **Confidence:** ${journey.confidence}%\n`;
+      markdown += `- **Pages in Journey:** ${journey.pageSequence.length}\n`;
+      markdown += `- **Element Patterns:** ${journey.elementPatterns.join(", ")}\n`;
+      markdown += `- **Tags:** ${journey.tags.join(", ")}\n\n`;
     }
   }
 

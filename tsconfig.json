@@ -33,6 +33,8 @@
     "src/heuristic-scorer.ts",
     "src/locator-generator.ts",
     "src/browser-pipeline.ts",
+    "src/advanced-workflow-detector.ts",
+    "src/performance-optimizer.ts",
     "src/index.ts"
   ],
   "exclude": [
