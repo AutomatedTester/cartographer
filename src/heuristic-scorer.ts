@@ -103,6 +103,39 @@ export class HeuristicScorer {
     }
 
     // =====================================================================
+    // 2a. TOP-LEVEL NAVIGATION INTENT (NEW: Navigation menu patterns)
+    // =====================================================================
+
+    const topLevelNavPatterns = [
+      // Find/Browse patterns
+      /^find|^browse|^search for/i,
+      // Section/Category patterns
+      /^specialties|^categories|^doctors|^services|^products|^features/i,
+      // Action patterns (but not destructive)
+      /^explore|^discover|^shop|^view|^book|^schedule|^reserve|^compare/i,
+      // Account/Organization patterns
+      /^profile|^settings|^my|^account|^organizations?|^team/i,
+      // Support patterns
+      /^help|^faq|^support|^about|^contact|^feedback|^blog|^docs?|^tutorial/i,
+      // Marketing patterns
+      /^pricing|^plans|^enterprise|^careers|^newsletter|^community|^resources/i,
+    ];
+
+    if (text && this.matchesPattern(text, topLevelNavPatterns)) {
+      score += 28;
+      reasons.push('Top-level navigation intent (+28)');
+    }
+
+    // =====================================================================
+    // 2b. NAVIGATION CONTEXT (links in nav/header context)
+    // =====================================================================
+
+    if (this.isInNavigationContext(element) && element.tag === 'a') {
+      score += 15;
+      reasons.push('Link in navigation context (+15)');
+    }
+
+    // =====================================================================
     // 3. ARIA ATTRIBUTES (Accessibility = Good Test Candidate)
     // =====================================================================
 
@@ -224,6 +257,20 @@ export class HeuristicScorer {
   }
 
   /**
+   * Check if element is within a navigation context (nav/header element)
+   */
+  private isInNavigationContext(element: DomElement): boolean {
+    // Check if element has path information (available on HighIntentElement cast)
+    const path = (element as any).path;
+    if (!path) return false;
+    
+    const pathLower = path.toLowerCase();
+    // Check if element is within nav or header tags
+    return pathLower.includes(' nav ') || pathLower.includes(' header ') || 
+           pathLower.startsWith('nav ') || pathLower.startsWith('header ');
+  }
+
+  /**
    * Get scoring explanation (for debugging)
    */
   static getExplanation(): string {
@@ -242,8 +289,12 @@ Scoring Breakdown:
 2. TEXT PATTERNS:
    - Destructive (delete, remove): 35 points
    - Form submission (submit, login): 30 points
+   - Top-level navigation (find, book, specialties): 28 points
    - Search/filter: 25 points
    - Navigation (next, back): 20 points
+
+2b. NAVIGATION CONTEXT (NEW):
+   - Link in nav/header element: 15 points
 
 3. ACCESSIBILITY:
    - ARIA role: 10 points

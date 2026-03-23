@@ -5,6 +5,7 @@ import {
     StateTransition,
     CrawledPage,
     WorkflowDetectionCache,
+    HighIntentElement,
 } from './types.js';
 
 /**
@@ -133,6 +134,12 @@ export class WorkflowDetector {
 
         try {
             workflows.push(...this.detectNavigationPatterns(session));
+        } catch (e) {
+            // Continue on error
+        }
+
+        try {
+            workflows.push(...this.detectNavMenuJourneys(session));
         } catch (e) {
             // Continue on error
         }
@@ -417,6 +424,126 @@ export class WorkflowDetector {
         }
 
         return workflows;
+    }
+
+    /**
+     * Detect navigation menu-driven journeys
+     * Identifies intent sequences from top-level nav menu exploration
+     * Examples:
+     *   - Home → Find Doctors → Doctor Detail
+     *   - Home → Specialties → Category → Results
+     */
+    private static detectNavMenuJourneys(session: CrawlSession): DetectedWorkflow[] {
+        const workflows: DetectedWorkflow[] = [];
+
+        if (!session?.pages?.length) return workflows;
+
+        const firstPage = session.pages[0];
+        if (!firstPage?.highIntentElements) return workflows;
+
+        // Extract top-level navigation items from first page
+        // Look for links or buttons with high intent scores and navigation intent reasons
+        const navItems = firstPage.highIntentElements.filter((el) => {
+            // Accept both <a> links and <button> elements with navigation intent
+            const isNavElement = el.navigates && (el.tag === 'a' || el.tag === 'button') && el.intentScore >= 28;
+            const isTopNav =
+                el.intentReasons?.some((r) => r.includes('top-level navigation intent')) ||
+                el.intentReasons?.some((r) => r.includes('Link in navigation context')) ||
+                el.intentReasons?.some((r) => r.includes('Search interaction')); // "Find Doctors" has this
+            return isNavElement && isTopNav;
+        });
+
+        // For each nav item, trace its journey through subsequent pages
+        for (const navItem of navItems) {
+            const navTarget = navItem.navigationTarget;
+            const navText = navItem.text || navItem.ariaLabel || 'navigation';
+
+            // If we don't have explicit navigation target, try to infer from text
+            let targetPages: CrawledPage[] = [];
+
+            if (navTarget) {
+                // Match pages that contain the navigation target in their URL
+                targetPages = session.pages.filter(
+                    (p) => p.url.includes(decodeURIComponent(navTarget)) || p.url.toLowerCase().includes(navText.toLowerCase())
+                );
+            } else if (session.pages.length > 1) {
+                // Fallback: Find pages based on title/content matching nav text
+                const navKeywords = navText.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+                targetPages = session.pages.slice(1).filter((p) => {
+                    const pageContent = (p.title + ' ' + (p.highIntentElements.map((el) => el.text) || []).join(' ')).toLowerCase();
+                    return navKeywords.some((kw) => pageContent.includes(kw));
+                });
+            }
+
+            if (targetPages.length === 0) continue;
+
+            // Build journey: Home → NavLink → TargetPage(s)
+            const journey: string[] = [firstPage.url];
+            const journeyPages: CrawledPage[] = [firstPage];
+
+            for (const targetPage of targetPages) {
+                journey.push(targetPage.url);
+                journeyPages.push(targetPage);
+
+                // Stop at 3 pages to avoid combinatorial explosion
+                if (journey.length >= 3) break;
+            }
+
+            if (journey.length >= 2) {
+                workflows.push({
+                    id: `wf_navmenu_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                    name: 'navigation_menu_exploration',
+                    pageSequence: journey,
+                    actionSequence: this.buildActionSequenceFromNavigation(firstPage, navItem, journeyPages),
+                    stateTransitions: this.buildStateTransitions(journeyPages),
+                    confidence: 70,
+                    tags: ['navigation', 'menu-driven', 'user-exploration', navText.toLowerCase().replace(/\s+/g, '-')],
+                });
+            }
+        }
+
+        return workflows;
+    }
+
+    /**
+     * Build action sequence from navigation menu interaction
+     */
+    private static buildActionSequenceFromNavigation(
+        homePage: CrawledPage,
+        navItem: HighIntentElement,
+        journeyPages: CrawledPage[]
+    ): WorkflowAction[] {
+        const actions: WorkflowAction[] = [];
+
+        // Step 1: Click the navigation link
+        actions.push({
+            pageUrl: homePage.url,
+            elementLocator: navItem.locator,
+            actionType: 'click',
+            resultingNavigation: navItem.navigationTarget,
+            timestamp: homePage.timestamp,
+        });
+
+        // Step 2+: Interact with elements on subsequent pages
+        for (let i = 1; i < journeyPages.length; i++) {
+            const page = journeyPages[i];
+            // Find high-intent elements that suggest further exploration
+            const intentElements = page.highIntentElements
+                .filter((el) => el.intentScore >= 50)
+                .slice(0, 2); // Top 2 intent elements per page
+
+            for (const el of intentElements) {
+                actions.push({
+                    pageUrl: page.url,
+                    elementLocator: el.locator,
+                    actionType: 'click',
+                    resultingNavigation: el.navigationTarget,
+                    timestamp: page.timestamp,
+                });
+            }
+        }
+
+        return actions;
     }
 
     /**
