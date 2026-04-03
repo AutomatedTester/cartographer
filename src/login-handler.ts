@@ -260,12 +260,14 @@ export class LoginHandler {
             await this.driver.executeScript('arguments[0].scrollIntoView(true);', container);
             await this.driver.sleep(200);
 
-            // Click the container to focus/open it
+            // Click the container to focus/open it using the WebDriver actions
+            // API so that a genuine pointer event is generated rather than a
+            // synthetic JavaScript click.
             try {
-                await container.click();
+                await this.driver.actions({ async: true }).click(container).perform();
             } catch (e) {
-                // Try executing click via script if element.click() fails
-                await this.driver.executeScript('arguments[0].click();', container);
+                // Fall back to the element-level click if actions API fails
+                await container.click();
             }
 
             await this.driver.sleep(300);

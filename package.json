@@ -12,6 +12,7 @@
     "prepublishOnly": "npm run build && npm run build:browser",
     "test": "npm run test:semantic",
     "test:semantic": "node test/test-semantic-tools.js",
+    "test:bidi": "node test/test-bidi-session.js",
     "test:mcp": "timeout 30 node test/test-mcp-client.js || true"
   },
   "dependencies": {
