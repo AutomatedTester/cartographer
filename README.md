@@ -138,6 +138,23 @@ Executes high-priority test cases (intent score ≥ 50) using auto-generated sem
 
 **Output**: Test execution results with pass/fail status and assertions. See [USAGE.md](USAGE.md#run_critical_tests) for details.
 
+### 4. `export_test_cases`
+
+Exports the most recently generated test cases into Selenium WebDriver BiDi code templates.
+
+**Input**
+
+```json
+{
+  "language": "typescript",
+  "testIds": ["TC_HOME_BUTTON_1"]
+}
+```
+
+Supported languages: `java`, `python`, `typescript`, `ruby`, `csharp`.
+
+**Output**: Executable Selenium WebDriver BiDi starter code generated from local crawl data (no additional model/token usage).
+
 ---
 
 ## Client Configuration

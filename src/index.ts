@@ -18,7 +18,7 @@ import {
 import { z } from "zod";
 
 import { SiteCrawler } from "./crawler.js";
-import { AnalysisResult, HighIntentElement, TestExecutionSummary, MultiPageCrawlResult, DetectedWorkflow, CrawlSession } from "./types.js";
+import { AnalysisResult, HighIntentElement, TestExecutionSummary, MultiPageCrawlResult, DetectedWorkflow, CrawlSession, GeneratedTestCase } from "./types.js";
 import { MarkdownExporter } from "./markdown-exporter.js";
 import { TestExecutor } from "./test-executor.js";
 import { SemanticToolGenerator } from "./webmcp-semantic-tools.js";
@@ -27,6 +27,7 @@ import { SessionManager } from "./session-manager.js";
 import { WorkflowDetector } from "./workflow-detector.js";
 import { LocatorGenerator } from "./locator-generator.js";
 import { BrowserAnalysisPipeline } from "./browser-pipeline.js";
+import { SeleniumBiDiExporter, SeleniumBiDiLanguage } from "./selenium-bidi-exporter.js";
 
 // ---------------------------------------------------------------------------
 // Helper Functions
@@ -105,6 +106,11 @@ const ExportWorkflowVisualizationInput = z.object({
   sessionId: z.string().min(1, { message: "Session ID is required." }),
   workflowIds: z.array(z.string()).optional(),
   format: z.enum(["individual", "comparison", "full"]).optional().default("full"),
+});
+
+const ExportTestCasesInput = z.object({
+  language: z.enum(["java", "python", "typescript", "ruby", "csharp"]).default("typescript"),
+  testIds: z.array(z.string()).optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -295,6 +301,27 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
         },
         required: ["sessionId"],
+      },
+    },
+    {
+      name: "export_test_cases",
+      description:
+        "Export generated test cases as Selenium WebDriver BiDi code in Java, Python, TypeScript, Ruby, or C#. Uses existing local analysis data to minimize additional token usage.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          language: {
+            type: "string",
+            enum: ["java", "python", "typescript", "ruby", "csharp"],
+            description: "Language for Selenium WebDriver BiDi export.",
+            default: "typescript",
+          },
+          testIds: {
+            type: "array",
+            items: { type: "string" },
+            description: "Optional. Specific test IDs to export. If omitted, all generated test cases are exported.",
+          },
+        },
       },
     },
   ],
@@ -588,6 +615,53 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       // Full detailed report with all workflows
       output = MarkdownExporter.exportDetectedWorkflows(workflowsToExport);
     }
+
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: output,
+        },
+      ],
+    };
+  }
+
+  if (name === "export_test_cases") {
+    const { language, testIds } = ExportTestCasesInput.parse(args);
+
+    if (!lastAnalysis?.generatedTestCases || lastAnalysis.generatedTestCases.length === 0) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: "No generated test cases available. Run crawl_and_analyze first.",
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const testCases = testIds
+      ? lastAnalysis.generatedTestCases.filter((testCase) => testIds.includes(testCase.id))
+      : lastAnalysis.generatedTestCases;
+
+    if (testCases.length === 0) {
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: "No matching test IDs found for export.",
+          },
+        ],
+        isError: true,
+      };
+    }
+
+    const output = SeleniumBiDiExporter.export(
+      testCases as GeneratedTestCase[],
+      language as SeleniumBiDiLanguage,
+      lastAnalysis.url
+    );
 
     return {
       content: [
