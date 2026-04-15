@@ -33,7 +33,6 @@ export class SeleniumBiDiExporter {
 
 (async function run() {
   const driver = await new Builder().forBrowser("chrome").build();
-  const browsingContext = await driver.createBrowserContext();
   const bidi = await driver.getBidi();
 
   try {

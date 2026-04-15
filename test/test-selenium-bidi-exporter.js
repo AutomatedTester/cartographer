@@ -26,32 +26,20 @@ const sampleTests = [
   },
 ];
 
-const languages = ["java", "python", "typescript", "ruby", "csharp"];
+const expectedByLanguage = {
+  typescript: ["getBidi", "session.end", "driver.quit()"],
+  python: ["bidi_connection", "bidi.close", "driver.quit()"],
+  java: ["HasBiDi", "bidi.close()", "driver.quit()"],
+  ruby: ["driver.bidi", "bidi.close", "driver.quit"],
+  csharp: ["AsBiDiAsync", "bidi.Dispose()", "driver.Quit()"],
+};
 
-for (const language of languages) {
+for (const [language, expectedTokens] of Object.entries(expectedByLanguage)) {
   const exported = SeleniumBiDiExporter.export(sampleTests, language, "https://example.com");
   assert.ok(exported.includes("button.login"), `Expected locator for ${language}`);
+  for (const token of expectedTokens) {
+    assert.ok(exported.includes(token), `Expected "${token}" in ${language} export`);
+  }
 }
-
-assert.ok(
-  SeleniumBiDiExporter.export(sampleTests, "typescript", "https://example.com").includes("getBidi"),
-  "TypeScript export should include BiDi session usage"
-);
-assert.ok(
-  SeleniumBiDiExporter.export(sampleTests, "python", "https://example.com").includes("bidi_connection"),
-  "Python export should include BiDi connection usage"
-);
-assert.ok(
-  SeleniumBiDiExporter.export(sampleTests, "java", "https://example.com").includes("HasBiDi"),
-  "Java export should include HasBiDi usage"
-);
-assert.ok(
-  SeleniumBiDiExporter.export(sampleTests, "ruby", "https://example.com").includes("driver.bidi"),
-  "Ruby export should include BiDi usage"
-);
-assert.ok(
-  SeleniumBiDiExporter.export(sampleTests, "csharp", "https://example.com").includes("AsBiDiAsync"),
-  "C# export should include BiDi usage"
-);
 
 console.log("Selenium WebDriver BiDi exporter tests passed.");
