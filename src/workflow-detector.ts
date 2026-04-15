@@ -700,11 +700,18 @@ export class WorkflowDetector {
         for (const workflow of normalized) {
             const key = JSON.stringify(workflow.pageSequence);
             const existing = seen.get(key);
+            const mergedTags = Array.from(new Set([...(existing?.tags || []), ...(workflow.tags || [])]));
 
             if (!existing || workflow.confidence > existing.confidence) {
-                seen.set(key, workflow);
+                seen.set(key, {
+                    ...workflow,
+                    tags: mergedTags,
+                });
             } else if (existing) {
-                existing.tags = Array.from(new Set([...(existing.tags || []), ...(workflow.tags || [])]));
+                seen.set(key, {
+                    ...existing,
+                    tags: mergedTags,
+                });
             }
         }
 
@@ -771,10 +778,11 @@ export class WorkflowDetector {
         const cleanedSequence: string[] = [];
         const seen = new Set<string>();
         let lastRank = -1;
+        let lastUrl: string | null = null;
 
         for (const url of workflow.pageSequence || []) {
             if (!url) continue;
-            if (cleanedSequence.length > 0 && cleanedSequence[cleanedSequence.length - 1] === url) continue;
+            if (lastUrl === url) continue;
             if (seen.has(url)) continue; // prune loops/backtracking cycles
 
             const rank = dag.rankByUrl.get(url) ?? Number.MAX_SAFE_INTEGER;
@@ -783,6 +791,7 @@ export class WorkflowDetector {
             cleanedSequence.push(url);
             seen.add(url);
             lastRank = rank;
+            lastUrl = url;
         }
 
         const keptUrls = new Set(cleanedSequence);
@@ -824,14 +833,14 @@ export class WorkflowDetector {
         return kept;
     }
 
-    private static isStrictSubsequence(sequence: string[], target: string[]): boolean {
-        if (sequence.length === 0 || sequence.length >= target.length) return false;
+    private static isStrictSubsequence(candidate: string[], container: string[]): boolean {
+        if (candidate.length === 0 || candidate.length >= container.length) return false;
 
         let index = 0;
-        for (const url of target) {
-            if (url === sequence[index]) {
+        for (const url of container) {
+            if (url === candidate[index]) {
                 index++;
-                if (index === sequence.length) return true;
+                if (index === candidate.length) return true;
             }
         }
         return false;

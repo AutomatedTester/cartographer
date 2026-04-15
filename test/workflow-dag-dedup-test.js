@@ -71,8 +71,8 @@ function runDagDedupTest() {
     pathKeyCount.set(key, (pathKeyCount.get(key) || 0) + 1);
   }
 
-  for (const count of pathKeyCount.values()) {
-    assert.strictEqual(count, 1, 'DAG dedup should keep only one workflow per canonical path');
+  for (const [pathKey, count] of pathKeyCount.entries()) {
+    assert.strictEqual(count, 1, `DAG dedup should keep only one workflow per canonical path: ${pathKey}`);
   }
 
   for (const workflow of workflows) {
@@ -85,10 +85,6 @@ function runDagDedupTest() {
   }
 
   console.log('✓ workflow-dag-dedup-test passed');
-  console.log(`  workflows detected: ${workflows.length}`);
-  workflows.forEach((w) => {
-    console.log(`  - ${w.name}: ${w.pageSequence.join(' -> ')}`);
-  });
 }
 
 runDagDedupTest();
