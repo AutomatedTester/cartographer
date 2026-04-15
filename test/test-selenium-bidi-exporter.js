@@ -55,4 +55,3 @@ assert.ok(
 );
 
 console.log("Selenium WebDriver BiDi exporter tests passed.");
-

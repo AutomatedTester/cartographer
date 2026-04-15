@@ -218,4 +218,3 @@ new OpenQA.Selenium.Interactions.Actions(driver).MoveToElement(hover).Perform();
       .join("\n");
   }
 }
-
