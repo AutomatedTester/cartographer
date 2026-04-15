@@ -159,21 +159,24 @@ ${this.indent(tests, 4)}
       case "input":
         action = `const el = await driver.findElement(By.css(${locator}));
     await el.clear();
-    await el.sendKeys(${JSON.stringify(DEFAULT_INPUT_VALUE)});`;
+    await el.sendKeys(${JSON.stringify(DEFAULT_INPUT_VALUE)});
+    expect(await el.getAttribute("value")).to.equal(${JSON.stringify(DEFAULT_INPUT_VALUE)});`;
         break;
       case "hover":
         action = `const el = await driver.findElement(By.css(${locator}));
-    await driver.actions().move({ origin: el }).perform();`;
+    await driver.actions().move({ origin: el }).perform();
+    expect(await el.isDisplayed()).to.equal(true);`;
         break;
       default:
-        action = `await driver.findElement(By.css(${locator})).click();`;
+        action = `const el = await driver.findElement(By.css(${locator}));
+    await el.click();
+    expect(await el.isDisplayed()).to.equal(true);`;
         break;
     }
 
     return `it('${testName}', async function () {
     await driver.get("${url}");
     ${action}
-    expect(true).to.equal(true);
   });`;
   }
 
@@ -186,14 +189,18 @@ ${this.indent(tests, 4)}
       case "input":
         action = `el = driver.find_element(By.CSS_SELECTOR, ${locator})
     el.clear()
-    el.send_keys(${JSON.stringify(DEFAULT_INPUT_VALUE)})`;
+    el.send_keys(${JSON.stringify(DEFAULT_INPUT_VALUE)})
+    assert el.get_attribute("value") == ${JSON.stringify(DEFAULT_INPUT_VALUE)}`;
         break;
       case "hover":
         action = `el = driver.find_element(By.CSS_SELECTOR, ${locator})
-    webdriver.ActionChains(driver).move_to_element(el).perform()`;
+    webdriver.ActionChains(driver).move_to_element(el).perform()
+    assert el.is_displayed()`;
         break;
       default:
-        action = `driver.find_element(By.CSS_SELECTOR, ${locator}).click()`;
+        action = `el = driver.find_element(By.CSS_SELECTOR, ${locator})
+    el.click()
+    assert el.is_displayed()`;
         break;
     }
 
@@ -213,14 +220,18 @@ ${this.indent(tests, 4)}
       case "input":
         action = `var input = driver.findElement(By.cssSelector(${locator}));
         input.clear();
-        input.sendKeys(${JSON.stringify(DEFAULT_INPUT_VALUE)});`;
+        input.sendKeys(${JSON.stringify(DEFAULT_INPUT_VALUE)});
+        Assertions.assertEquals(${JSON.stringify(DEFAULT_INPUT_VALUE)}, input.getAttribute("value"));`;
         break;
       case "hover":
         action = `var hover = driver.findElement(By.cssSelector(${locator}));
-        new org.openqa.selenium.interactions.Actions(driver).moveToElement(hover).perform();`;
+        new org.openqa.selenium.interactions.Actions(driver).moveToElement(hover).perform();
+        Assertions.assertTrue(hover.isDisplayed());`;
         break;
       default:
-        action = `driver.findElement(By.cssSelector(${locator})).click();`;
+        action = `var clickable = driver.findElement(By.cssSelector(${locator}));
+        clickable.click();
+        Assertions.assertTrue(clickable.isDisplayed());`;
         break;
     }
 
@@ -228,7 +239,6 @@ ${this.indent(tests, 4)}
     void ${methodName}() {
         driver.get("${url}");
         ${action}
-        Assertions.assertTrue(true);
     }`;
   }
 
@@ -256,14 +266,18 @@ driver.action.move_to(el).perform`;
       case "input":
         action = `var input = driver.FindElement(By.CssSelector(${locator}));
         input.Clear();
-        input.SendKeys(${JSON.stringify(DEFAULT_INPUT_VALUE)});`;
+        input.SendKeys(${JSON.stringify(DEFAULT_INPUT_VALUE)});
+        Assert.That(input.GetAttribute("value"), Is.EqualTo(${JSON.stringify(DEFAULT_INPUT_VALUE)}));`;
         break;
       case "hover":
         action = `var hover = driver.FindElement(By.CssSelector(${locator}));
-        new OpenQA.Selenium.Interactions.Actions(driver).MoveToElement(hover).Perform();`;
+        new OpenQA.Selenium.Interactions.Actions(driver).MoveToElement(hover).Perform();
+        Assert.That(hover.Displayed, Is.True);`;
         break;
       default:
-        action = `driver.FindElement(By.CssSelector(${locator})).Click();`;
+        action = `var clickable = driver.FindElement(By.CssSelector(${locator}));
+        clickable.Click();
+        Assert.That(clickable.Displayed, Is.True);`;
         break;
     }
 
@@ -272,7 +286,6 @@ driver.action.move_to(el).perform`;
     {
         driver.Navigate().GoToUrl("${url}");
         ${action}
-        Assert.That(true, Is.True);
     }`;
   }
 
