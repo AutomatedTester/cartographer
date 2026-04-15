@@ -29,61 +29,75 @@ export class SeleniumBiDiExporter {
   }
 
   private static exportTypeScript(testCases: GeneratedTestCase[], url: string): string {
-    const tests = testCases.map((tc) => this.generateTypeScriptTest(tc)).join("\n\n");
-    return `import { Builder, By } from "selenium-webdriver";
+    const tests = testCases.map((tc) => this.generateTypeScriptTest(tc, url)).join("\n\n");
+    return `import { Builder, By, WebDriver } from "selenium-webdriver";
+import { expect } from "chai";
 
-(async function run() {
-  const driver = await new Builder().forBrowser("chrome").build();
-  const bidi = await driver.getBidi();
+describe("Exported BiDi Tests", function () {
+  this.timeout(60000);
 
-  try {
-    await driver.get("${url}");
+  let driver: WebDriver;
+  let bidi: any;
 
-${this.indent(tests, 4)}
-  } finally {
+  before(async function () {
+    driver = await new Builder().forBrowser("chrome").build();
+    bidi = await driver.getBidi();
+  });
+
+  after(async function () {
     await bidi.session.end();
     await driver.quit();
-  }
-})();`;
+  });
+
+${this.indent(tests, 2)}
+});`;
   }
 
   private static exportPython(testCases: GeneratedTestCase[], url: string): string {
-    const tests = testCases.map((tc) => this.generatePythonTest(tc)).join("\n\n");
-    return `from selenium import webdriver
+    const tests = testCases.map((tc) => this.generatePythonTest(tc, url)).join("\n\n");
+    return `import pytest
+from selenium import webdriver
 from selenium.webdriver.common.by import By
 
-driver = webdriver.Chrome()
-bidi = driver.bidi_connection()
-
-try:
-    driver.get("${url}")
-
-${this.indent(tests, 4)}
-finally:
+@pytest.fixture(scope="module")
+def browser():
+    driver = webdriver.Chrome()
+    bidi = driver.bidi_connection()
+    yield driver, bidi
     bidi.close()
     driver.quit()
+
+${tests}
 `;
   }
 
   private static exportJava(testCases: GeneratedTestCase[], url: string): string {
-    const tests = testCases.map((tc) => this.generateJavaTest(tc)).join("\n\n");
+    const tests = testCases.map((tc) => this.generateJavaTest(tc, url)).join("\n\n");
     return `import org.openqa.selenium.By;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.chrome.ChromeDriver;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 
 public class ExportedBiDiTests {
-    public static void main(String[] args) {
-        WebDriver driver = new ChromeDriver();
-        var bidi = ((org.openqa.selenium.bidi.HasBiDi) driver).getBiDi();
-        try {
-            driver.get("${url}");
+    private static WebDriver driver;
+    private static org.openqa.selenium.bidi.BiDi bidi;
 
-${this.indent(tests, 12)}
-        } finally {
-            bidi.close();
-            driver.quit();
-        }
+    @BeforeAll
+    static void setup() {
+        driver = new ChromeDriver();
+        bidi = ((org.openqa.selenium.bidi.HasBiDi) driver).getBiDi();
     }
+
+    @AfterAll
+    static void teardown() {
+        bidi.close();
+        driver.quit();
+    }
+
+${this.indent(tests, 4)}
 }`;
   }
 
@@ -106,74 +120,116 @@ end
   }
 
   private static exportCSharp(testCases: GeneratedTestCase[], url: string): string {
-    const tests = testCases.map((tc) => this.generateCSharpTest(tc)).join("\n\n");
-    return `using OpenQA.Selenium;
+    const tests = testCases.map((tc) => this.generateCSharpTest(tc, url)).join("\n\n");
+    return `using NUnit.Framework;
+using OpenQA.Selenium;
 using OpenQA.Selenium.Chrome;
 
-var driver = new ChromeDriver();
-var bidi = ((OpenQA.Selenium.BiDi.IBiDi)driver).AsBiDiAsync().Result;
-
-try
+[TestFixture]
+public class ExportedBiDiTests
 {
-    driver.Navigate().GoToUrl("${url}");
+    private IWebDriver driver = null!;
+    private dynamic bidi = null!;
+
+    [OneTimeSetUp]
+    public void Setup()
+    {
+        driver = new ChromeDriver();
+        bidi = ((OpenQA.Selenium.BiDi.IBiDi)driver).AsBiDiAsync().Result;
+    }
+
+    [OneTimeTearDown]
+    public void Teardown()
+    {
+        bidi.Dispose();
+        driver.Quit();
+    }
 
 ${this.indent(tests, 4)}
-}
-finally
-{
-    bidi.Dispose();
-    driver.Quit();
 }
 `;
   }
 
-  private static generateTypeScriptTest(tc: GeneratedTestCase): string {
+  private static generateTypeScriptTest(tc: GeneratedTestCase, url: string): string {
+    const testName = this.escapeSingleQuotedText(tc.id || tc.name || "generated test");
     const locator = this.selectorLiteral(tc.locator);
+    let action: string;
+
     switch (tc.actionType) {
       case "input":
-        return `{
-  const el = await driver.findElement(By.css(${locator}));
-  await el.clear();
-  await el.sendKeys(${JSON.stringify(DEFAULT_INPUT_VALUE)});
-}`;
+        action = `const el = await driver.findElement(By.css(${locator}));
+    await el.clear();
+    await el.sendKeys(${JSON.stringify(DEFAULT_INPUT_VALUE)});`;
+        break;
       case "hover":
-        return `{
-  const el = await driver.findElement(By.css(${locator}));
-  await driver.actions().move({ origin: el }).perform();
-}`;
+        action = `const el = await driver.findElement(By.css(${locator}));
+    await driver.actions().move({ origin: el }).perform();`;
+        break;
       default:
-        return `await driver.findElement(By.css(${locator})).click();`;
+        action = `await driver.findElement(By.css(${locator})).click();`;
+        break;
     }
+
+    return `it('${testName}', async function () {
+    await driver.get("${url}");
+    ${action}
+    expect(true).to.equal(true);
+  });`;
   }
 
-  private static generatePythonTest(tc: GeneratedTestCase): string {
+  private static generatePythonTest(tc: GeneratedTestCase, url: string): string {
+    const testName = this.toPythonTestName(tc.id || tc.name || "generated_test");
     const locator = this.selectorLiteral(tc.locator);
+    let action: string;
+
     switch (tc.actionType) {
       case "input":
-        return `el = driver.find_element(By.CSS_SELECTOR, ${locator})
-el.clear()
-el.send_keys(${JSON.stringify(DEFAULT_INPUT_VALUE)})`;
+        action = `el = driver.find_element(By.CSS_SELECTOR, ${locator})
+    el.clear()
+    el.send_keys(${JSON.stringify(DEFAULT_INPUT_VALUE)})`;
+        break;
       case "hover":
-        return `el = driver.find_element(By.CSS_SELECTOR, ${locator})
-webdriver.ActionChains(driver).move_to_element(el).perform()`;
+        action = `el = driver.find_element(By.CSS_SELECTOR, ${locator})
+    webdriver.ActionChains(driver).move_to_element(el).perform()`;
+        break;
       default:
-        return `driver.find_element(By.CSS_SELECTOR, ${locator}).click()`;
+        action = `driver.find_element(By.CSS_SELECTOR, ${locator}).click()`;
+        break;
     }
+
+    return `def test_${testName}(browser):
+    driver, _ = browser
+    driver.get("${url}")
+    ${action}
+    assert True`;
   }
 
-  private static generateJavaTest(tc: GeneratedTestCase): string {
+  private static generateJavaTest(tc: GeneratedTestCase, url: string): string {
+    const methodName = this.toJavaMethodName(tc.id || tc.name || "generated_test");
     const locator = this.selectorLiteral(tc.locator);
+    let action: string;
+
     switch (tc.actionType) {
       case "input":
-        return `var input = driver.findElement(By.cssSelector(${locator}));
-            input.clear();
-            input.sendKeys(${JSON.stringify(DEFAULT_INPUT_VALUE)});`;
+        action = `var input = driver.findElement(By.cssSelector(${locator}));
+        input.clear();
+        input.sendKeys(${JSON.stringify(DEFAULT_INPUT_VALUE)});`;
+        break;
       case "hover":
-        return `var hover = driver.findElement(By.cssSelector(${locator}));
-            new org.openqa.selenium.interactions.Actions(driver).moveToElement(hover).perform();`;
+        action = `var hover = driver.findElement(By.cssSelector(${locator}));
+        new org.openqa.selenium.interactions.Actions(driver).moveToElement(hover).perform();`;
+        break;
       default:
-        return `driver.findElement(By.cssSelector(${locator})).click();`;
+        action = `driver.findElement(By.cssSelector(${locator})).click();`;
+        break;
     }
+
+    return `@Test
+    void ${methodName}() {
+        driver.get("${url}");
+        ${action}
+        Assertions.assertTrue(true);
+    }`;
   }
 
   private static generateRubyTest(tc: GeneratedTestCase): string {
@@ -191,19 +247,33 @@ driver.action.move_to(el).perform`;
     }
   }
 
-  private static generateCSharpTest(tc: GeneratedTestCase): string {
+  private static generateCSharpTest(tc: GeneratedTestCase, url: string): string {
+    const methodName = this.toCSharpMethodName(tc.id || tc.name || "GeneratedTest");
     const locator = this.selectorLiteral(tc.locator);
+    let action: string;
+
     switch (tc.actionType) {
       case "input":
-        return `var input = driver.FindElement(By.CssSelector(${locator}));
-input.Clear();
-input.SendKeys(${JSON.stringify(DEFAULT_INPUT_VALUE)});`;
+        action = `var input = driver.FindElement(By.CssSelector(${locator}));
+        input.Clear();
+        input.SendKeys(${JSON.stringify(DEFAULT_INPUT_VALUE)});`;
+        break;
       case "hover":
-        return `var hover = driver.FindElement(By.CssSelector(${locator}));
-new OpenQA.Selenium.Interactions.Actions(driver).MoveToElement(hover).Perform();`;
+        action = `var hover = driver.FindElement(By.CssSelector(${locator}));
+        new OpenQA.Selenium.Interactions.Actions(driver).MoveToElement(hover).Perform();`;
+        break;
       default:
-        return `driver.FindElement(By.CssSelector(${locator})).Click();`;
+        action = `driver.FindElement(By.CssSelector(${locator})).Click();`;
+        break;
     }
+
+    return `[Test]
+    public void ${methodName}()
+    {
+        driver.Navigate().GoToUrl("${url}");
+        ${action}
+        Assert.That(true, Is.True);
+    }`;
   }
 
   private static selectorLiteral(selector: string): string {
@@ -216,5 +286,29 @@ new OpenQA.Selenium.Interactions.Actions(driver).MoveToElement(hover).Perform();
       .split("\n")
       .map((line) => (line.length > 0 ? `${pad}${line}` : line))
       .join("\n");
+  }
+
+  private static toPythonTestName(name: string): string {
+    return name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "generated_test";
+  }
+
+  private static toJavaMethodName(name: string): string {
+    const cleaned = name.replace(/[^a-zA-Z0-9]+/g, " ").trim();
+    if (!cleaned) return "generatedTest";
+    const [first, ...rest] = cleaned.split(/\s+/);
+    return first.toLowerCase() + rest.map((p) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join("");
+  }
+
+  private static toCSharpMethodName(name: string): string {
+    const cleaned = name.replace(/[^a-zA-Z0-9]+/g, " ").trim();
+    if (!cleaned) return "GeneratedTest";
+    return cleaned
+      .split(/\s+/)
+      .map((p) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase())
+      .join("");
+  }
+
+  private static escapeSingleQuotedText(text: string): string {
+    return text.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
   }
 }

@@ -27,11 +27,11 @@ const sampleTests = [
 ];
 
 const expectedByLanguage = {
-  typescript: ["getBidi", "session.end", "driver.quit()"],
-  python: ["bidi_connection", "bidi.close", "driver.quit()"],
-  java: ["HasBiDi", "bidi.close()", "driver.quit()"],
+  typescript: ["describe(", "it(", "before(", "after(", "getBidi", "session.end"],
+  python: ["import pytest", "@pytest.fixture", "def test_", "bidi_connection", "bidi.close"],
+  java: ["org.junit.jupiter.api", "@BeforeAll", "@AfterAll", "@Test", "HasBiDi"],
   ruby: ["driver.bidi", "bidi.close", "driver.quit"],
-  csharp: ["AsBiDiAsync", "bidi.Dispose()", "driver.Quit()"],
+  csharp: ["using NUnit.Framework;", "[TestFixture]", "[OneTimeSetUp]", "[Test]", "AsBiDiAsync"],
 };
 
 for (const [language, expectedTokens] of Object.entries(expectedByLanguage)) {
