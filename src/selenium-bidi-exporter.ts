@@ -1,6 +1,7 @@
 import { GeneratedTestCase } from "./types.js";
 
 export type SeleniumBiDiLanguage = "java" | "python" | "typescript" | "ruby" | "csharp";
+const DEFAULT_INPUT_VALUE = "test-value";
 
 /**
  * Exports generated test cases as Selenium WebDriver BiDi code snippets.
@@ -133,7 +134,7 @@ finally
         return `{
   const el = await driver.findElement(By.css(${locator}));
   await el.clear();
-  await el.sendKeys("test-value");
+  await el.sendKeys(${JSON.stringify(DEFAULT_INPUT_VALUE)});
 }`;
       case "hover":
         return `{
@@ -151,7 +152,7 @@ finally
       case "input":
         return `el = driver.find_element(By.CSS_SELECTOR, ${locator})
 el.clear()
-el.send_keys("test-value")`;
+el.send_keys(${JSON.stringify(DEFAULT_INPUT_VALUE)})`;
       case "hover":
         return `el = driver.find_element(By.CSS_SELECTOR, ${locator})
 webdriver.ActionChains(driver).move_to_element(el).perform()`;
@@ -166,7 +167,7 @@ webdriver.ActionChains(driver).move_to_element(el).perform()`;
       case "input":
         return `var input = driver.findElement(By.cssSelector(${locator}));
             input.clear();
-            input.sendKeys("test-value");`;
+            input.sendKeys(${JSON.stringify(DEFAULT_INPUT_VALUE)});`;
       case "hover":
         return `var hover = driver.findElement(By.cssSelector(${locator}));
             new org.openqa.selenium.interactions.Actions(driver).moveToElement(hover).perform();`;
@@ -181,7 +182,7 @@ webdriver.ActionChains(driver).move_to_element(el).perform()`;
       case "input":
         return `el = driver.find_element(:css, ${locator})
 el.clear
-el.send_keys("test-value")`;
+el.send_keys(${JSON.stringify(DEFAULT_INPUT_VALUE)})`;
       case "hover":
         return `el = driver.find_element(:css, ${locator})
 driver.action.move_to(el).perform`;
@@ -196,7 +197,7 @@ driver.action.move_to(el).perform`;
       case "input":
         return `var input = driver.FindElement(By.CssSelector(${locator}));
 input.Clear();
-input.SendKeys("test-value");`;
+input.SendKeys(${JSON.stringify(DEFAULT_INPUT_VALUE)});`;
       case "hover":
         return `var hover = driver.FindElement(By.CssSelector(${locator}));
 new OpenQA.Selenium.Interactions.Actions(driver).MoveToElement(hover).Perform();`;
