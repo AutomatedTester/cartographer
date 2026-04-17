@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
-import { Builder, WebDriver, logging } from "selenium-webdriver";
+import { Builder, WebDriver, WebElement, logging } from "selenium-webdriver";
 import chrome from "selenium-webdriver/chrome.js";
 import { AnalysisResult } from "./types.js";
 import { SemanticHandlerGenerator } from "./webmcp-semantic-handlers.js";
@@ -9,11 +9,17 @@ import { SemanticHandlerGenerator } from "./webmcp-semantic-handlers.js";
 /**
  * SiteCrawler uses a headless Chrome instance managed by Selenium Manager
  * (no manual chromedriver downloads required) to capture page snapshots.
+ *
+ * A WebDriver BiDi session is established at startup so that pointer
+ * interactions go through the W3C BiDi input module rather than synthetic
+ * JavaScript events.  Call {@link verifyBiDiSession} after {@link init} to
+ * confirm the connection.
  */
 export class SiteCrawler {
   private driver: WebDriver | null = null;
+  private biDiEnabled: boolean = false;
 
-  /** Build and launch a headless Chrome driver. */
+  /** Build and launch a headless Chrome driver with BiDi enabled. */
   async init(): Promise<void> {
     const options = new chrome.Options();
     options.addArguments(
@@ -29,10 +35,64 @@ export class SiteCrawler {
     prefs.setLevel(logging.Type.BROWSER, logging.Level.ALL);
     options.setLoggingPrefs(prefs);
 
+    // Request a WebDriver BiDi session so pointer actions use the BiDi
+    // input module instead of synthetic JavaScript events.
+    options.enableBidi();
+
     this.driver = await new Builder()
       .forBrowser("chrome")
       .setChromeOptions(options)
       .build();
+
+    // Verify the BiDi session was actually established by the browser.
+    this.biDiEnabled = await this.verifyBiDiSession();
+    if (this.biDiEnabled) {
+      console.log("[crawler] WebDriver BiDi session established.");
+    } else {
+      console.warn(
+        "[crawler] WebDriver BiDi session was not established. " +
+          "Falling back to classic WebDriver interactions."
+      );
+    }
+  }
+
+  /**
+   * Verify that the current driver session has an active WebDriver BiDi
+   * connection by inspecting the session capabilities for a `webSocketUrl`.
+   *
+   * @returns `true` when BiDi is active, `false` otherwise.
+   */
+  async verifyBiDiSession(): Promise<boolean> {
+    if (!this.driver) {
+      return false;
+    }
+    try {
+      const caps = await this.driver.getCapabilities();
+      const wsUrl = caps.get("webSocketUrl");
+      return typeof wsUrl === "string" && wsUrl.length > 0;
+    } catch {
+      return false;
+    }
+  }
+
+  /** Returns `true` when the active session has BiDi enabled. */
+  isBiDiEnabled(): boolean {
+    return this.biDiEnabled;
+  }
+
+  /**
+   * Perform a real pointer click on a {@link WebElement} using the WebDriver
+   * actions API.  This routes through the W3C BiDi input module when BiDi is
+   * active, producing genuine OS-level pointer events instead of a synthetic
+   * JavaScript `click()` call.
+   *
+   * @param element The target element to click.
+   */
+  async clickElement(element: WebElement): Promise<void> {
+    if (!this.driver) {
+      throw new Error("SiteCrawler is not initialized. Call init() first.");
+    }
+    await this.driver.actions({ async: true }).click(element).perform();
   }
 
   /**

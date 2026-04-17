@@ -8,7 +8,7 @@ import {
     MultiPageCrawlResult,
     CrawledPage,
 } from './types.js';
-import { WebDriver, By } from 'selenium-webdriver';
+import { WebDriver, By, WebElement } from 'selenium-webdriver';
 
 /**
  * MultiPageCrawler extends SiteCrawler to handle multi-page crawling,
@@ -466,11 +466,14 @@ export class MultiPageCrawler {
                 }
 
                 if (!clicked) {
-                    // Fallback: Use JavaScript to find and click
+                    // Fallback: locate the button via JavaScript then click it
+                    // using the WebDriver actions API so that a genuine pointer
+                    // event is produced instead of a synthetic JS click().
                     try {
-                        await driver.executeScript(`
+                        const searchTerm = buttonId.toLowerCase();
+                        const element = await driver.executeScript<WebElement | null>(`
                             const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
-                            const searchTerm = '${buttonId.toLowerCase()}';
+                            const searchTerm = arguments[0];
                             const btn = buttons.find(b =>
                                 b.textContent?.toLowerCase().includes(searchTerm) ||
                                 b.getAttribute('aria-label')?.toLowerCase().includes(searchTerm) ||
@@ -478,13 +481,14 @@ export class MultiPageCrawler {
                             );
                             if (btn) {
                                 btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                                btn.click();
-                                return true;
                             }
-                            return false;
-                        `);
-                        clicked = true;
-                        console.error(`[multi-page-crawler]   Clicked button via JavaScript`);
+                            return btn || null;
+                        `, searchTerm);
+                        if (element) {
+                            await driver.actions({ async: true }).click(element as WebElement).perform();
+                            clicked = true;
+                            console.error(`[multi-page-crawler]   Clicked button via WebDriver actions`);
+                        }
                     } catch (e) {
                         console.error(`[multi-page-crawler]   ✗ Could not find or click button`);
                     }
