@@ -7,6 +7,7 @@ import {
     MultiPageCrawlConfig,
     MultiPageCrawlResult,
     CrawledPage,
+    CrawlError,
 } from './types.js';
 import { WebDriver, By, WebElement } from 'selenium-webdriver';
 
@@ -18,6 +19,7 @@ export class MultiPageCrawler {
     private baseCrawler: SiteCrawler;
     private sessionManager: SessionManager;
     private config: MultiPageCrawlConfig;
+    private crawlErrors: CrawlError[] = [];
 
     constructor(config: MultiPageCrawlConfig) {
         // Normalize URL by adding https:// if no protocol provided
@@ -61,6 +63,7 @@ export class MultiPageCrawler {
      */
     async crawl(): Promise<MultiPageCrawlResult> {
         try {
+            this.crawlErrors = [];
             console.error('[multi-page-crawler] Initializing browser...');
             await this.baseCrawler.init();
             console.error('[multi-page-crawler] Browser initialized, starting crawl...');
@@ -133,6 +136,7 @@ export class MultiPageCrawler {
             }
 
             const session = await this.sessionManager.finalize();
+            session.metadata.failedPages = this.crawlErrors.length;
             const totalTime = Date.now() - startTime;
 
             // Infer user journeys from heuristic analysis
@@ -147,8 +151,10 @@ export class MultiPageCrawler {
                 session,
                 detectedWorkflows: session.workflows,
                 inferredJourneys,
+                crawlErrors: [...this.crawlErrors],
                 summary: {
                     pagesVisited: session.pages.length,
+                    failedPages: this.crawlErrors.length,
                     totalElements: session.pages.reduce((acc, p) => acc + (p && p.highIntentElements ? p.highIntentElements.length : 0), 0),
                     highIntentElements: session.metadata.totalHighIntentElements,
                     workflowsDetected: session.workflows.length,
@@ -200,8 +206,19 @@ export class MultiPageCrawler {
             // Crawl the page
             const result = await this.baseCrawler.crawlAndAnalyze(
                 url,
-                this.config.intentThreshold
+                this.config.intentThreshold,
+                {
+                    scriptTimeoutMs: this.config.scriptTimeoutMs,
+                    pageLoadTimeoutMs: this.config.pageLoadTimeout,
+                    analyzerTimeoutMs: this.config.analysisTimeoutMs,
+                    analyzerInitTimeoutMs: this.config.modelLoadTimeoutMs,
+                }
             );
+
+            if (result.error) {
+                throw new Error(`analysis_error: ${result.error}`);
+            }
+
             console.error(`[multi-page-crawler] Page analyzed, got ${result?.highIntentElements?.length || 0} high-intent elements`);
 
             const page: CrawledPage = {
@@ -250,8 +267,29 @@ export class MultiPageCrawler {
             if (error instanceof Error) {
                 console.error(`[multi-page-crawler] Error stack:`, error.stack);
             }
+            this.crawlErrors.push({
+                url,
+                depth,
+                phase: this.inferFailurePhase(error),
+                message: error instanceof Error ? error.message : String(error),
+                timestamp: Date.now(),
+            });
             return null;
         }
+    }
+
+    private inferFailurePhase(error: unknown): CrawlError['phase'] {
+        const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
+        if (msg.includes('timeout') || msg.includes('script')) {
+            return 'analyze';
+        }
+        if (msg.includes('navigate') || msg.includes('page load')) {
+            return 'navigate';
+        }
+        if (msg.includes('extract')) {
+            return 'extract';
+        }
+        return 'unknown';
     }
 
     /**

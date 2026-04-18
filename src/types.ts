@@ -109,6 +109,8 @@ export interface AnalysisResult {
     highIntentElements: HighIntentElement[];
     generatedTestCases?: GeneratedTestCase[];
     consoleLogs: string[];
+    /** Optional analysis error while still returning a structured payload */
+    error?: string;
     /** Fallback: All navigation links found on page (href targets) */
     allNavigationLinks?: string[];
     /** Performance and device metrics for this analysis */
@@ -179,6 +181,7 @@ export interface CrawlSession {
         totalPages: number;
         totalElementsAnalyzed: number;
         totalHighIntentElements: number;
+        failedPages?: number;
     };
     /** Session-level state variables (user input, selections, auth tokens, etc.) */
     sessionState: Record<string, any>;
@@ -252,6 +255,12 @@ export interface MultiPageCrawlConfig {
     maxDepth?: number;
     /** Page load timeout in milliseconds (default: 30000) */
     pageLoadTimeout?: number;
+    /** Script execution timeout for browser analysis (default: 120000) */
+    scriptTimeoutMs?: number;
+    /** Watchdog timeout around analyzer execution in-browser (default: 90000) */
+    analysisTimeoutMs?: number;
+    /** Timeout per ML device backend before trying next, then heuristic fallback (default: 5000) */
+    modelLoadTimeoutMs?: number;
     /** Intent score threshold for element selection (default: 25) */
     intentThreshold?: number;
     /** Whether to auto-detect workflows (default: true) */
@@ -284,6 +293,15 @@ export interface MultiPageCrawlConfig {
     enableAutoLogin?: boolean;
 }
 
+/** Captures a page-level crawl failure with enough context for diagnostics */
+export interface CrawlError {
+    url: string;
+    depth: number;
+    phase: 'navigate' | 'analyze' | 'extract' | 'unknown';
+    message: string;
+    timestamp: number;
+}
+
 /** Cache entry for workflow detection results */
 export interface WorkflowDetectionCache {
     /** Hash of page sequence for cache key */
@@ -312,9 +330,12 @@ export interface MultiPageCrawlResult {
         confidence: number;
         tags: string[];
     }>;
+    /** Detailed per-page crawl failures captured during execution */
+    crawlErrors?: CrawlError[];
     /** Summary statistics */
     summary: {
         pagesVisited: number;
+        failedPages?: number;
         totalElements: number;
         highIntentElements: number;
         workflowsDetected: number;

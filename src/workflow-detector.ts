@@ -683,18 +683,166 @@ export class WorkflowDetector {
      * Remove duplicate workflows, keep highest confidence
      */
     private static deduplicateWorkflows(workflows: DetectedWorkflow[]): DetectedWorkflow[] {
+        if (!Array.isArray(workflows) || workflows.length === 0) {
+            return [];
+        }
+
+        // Build a workflow DAG once so all candidates share the same acyclic ordering.
+        const dag = this.buildWorkflowDag(workflows);
+
+        const normalized = workflows
+            .map((workflow) => this.normalizeWorkflowWithDag(workflow, dag))
+            .filter((workflow) => workflow.pageSequence.length >= 2);
+
+        // Deduplicate by canonical page path (not detector name), keeping best confidence.
         const seen = new Map<string, DetectedWorkflow>();
 
-        for (const workflow of workflows) {
-            const key = workflow.name + JSON.stringify(workflow.pageSequence);
+        for (const workflow of normalized) {
+            const key = JSON.stringify(workflow.pageSequence);
             const existing = seen.get(key);
+            const mergedTags = Array.from(new Set([...(existing?.tags || []), ...(workflow.tags || [])]));
 
             if (!existing || workflow.confidence > existing.confidence) {
-                seen.set(key, workflow);
+                seen.set(key, {
+                    ...workflow,
+                    tags: mergedTags,
+                });
+            } else if (existing) {
+                seen.set(key, {
+                    ...existing,
+                    tags: mergedTags,
+                });
             }
         }
 
+        // Prune workflows that are strict subpaths of a stronger workflow.
+        const pruned = this.pruneRedundantWorkflows(Array.from(seen.values()));
+
         // Sort by confidence descending
-        return Array.from(seen.values()).sort((a, b) => b.confidence - a.confidence);
+        return pruned.sort((a, b) => b.confidence - a.confidence);
+    }
+
+    /**
+     * Build DAG metadata for workflow paths.
+     * Back-edges are ignored to keep traversal acyclic.
+     */
+    private static buildWorkflowDag(workflows: DetectedWorkflow[]): {
+        adjacency: Map<string, Set<string>>;
+        rankByUrl: Map<string, number>;
+    } {
+        const adjacency = new Map<string, Set<string>>();
+        const rankByUrl = new Map<string, number>();
+
+        for (const workflow of workflows) {
+            const sequence = workflow.pageSequence || [];
+            for (let i = 0; i < sequence.length; i++) {
+                const url = sequence[i];
+                if (!rankByUrl.has(url)) {
+                    rankByUrl.set(url, i);
+                } else {
+                    rankByUrl.set(url, Math.min(rankByUrl.get(url)!, i));
+                }
+            }
+        }
+
+        for (const workflow of workflows) {
+            const sequence = workflow.pageSequence || [];
+            for (let i = 0; i < sequence.length - 1; i++) {
+                const from = sequence[i];
+                const to = sequence[i + 1];
+                if (!from || !to || from === to) continue;
+
+                const fromRank = rankByUrl.get(from) ?? Number.MAX_SAFE_INTEGER;
+                const toRank = rankByUrl.get(to) ?? Number.MAX_SAFE_INTEGER;
+
+                // Ignore back edges to preserve DAG shape.
+                if (toRank < fromRank) continue;
+
+                if (!adjacency.has(from)) {
+                    adjacency.set(from, new Set<string>());
+                }
+                adjacency.get(from)!.add(to);
+            }
+        }
+
+        return { adjacency, rankByUrl };
+    }
+
+    /**
+     * Normalize a workflow path by pruning cycles/redundant steps using DAG ordering.
+     */
+    private static normalizeWorkflowWithDag(
+        workflow: DetectedWorkflow,
+        dag: { adjacency: Map<string, Set<string>>; rankByUrl: Map<string, number> }
+    ): DetectedWorkflow {
+        const cleanedSequence: string[] = [];
+        const seen = new Set<string>();
+        let lastRank = -1;
+        let lastUrl: string | null = null;
+
+        for (const url of workflow.pageSequence || []) {
+            if (!url) continue;
+            if (lastUrl === url) continue;
+            if (seen.has(url)) continue; // prune loops/backtracking cycles
+
+            const rank = dag.rankByUrl.get(url) ?? Number.MAX_SAFE_INTEGER;
+            if (rank < lastRank) continue; // prune non-DAG step
+
+            cleanedSequence.push(url);
+            seen.add(url);
+            lastRank = rank;
+            lastUrl = url;
+        }
+
+        const keptUrls = new Set(cleanedSequence);
+        const actionSequence = (workflow.actionSequence || []).filter((action) =>
+            keptUrls.has(action.pageUrl)
+        );
+        const stateTransitions = (workflow.stateTransitions || []).filter(
+            (transition) => keptUrls.has(transition.fromPage) && keptUrls.has(transition.toPage)
+        );
+
+        return {
+            ...workflow,
+            pageSequence: cleanedSequence,
+            actionSequence,
+            stateTransitions,
+        };
+    }
+
+    /**
+     * Remove workflows whose page sequence is a strict subsequence of a stronger one.
+     */
+    private static pruneRedundantWorkflows(workflows: DetectedWorkflow[]): DetectedWorkflow[] {
+        const sorted = [...workflows].sort((a, b) => {
+            if (b.confidence !== a.confidence) return b.confidence - a.confidence;
+            return (b.pageSequence?.length || 0) - (a.pageSequence?.length || 0);
+        });
+
+        const kept: DetectedWorkflow[] = [];
+        for (const workflow of sorted) {
+            const sequence = workflow.pageSequence || [];
+            const isRedundant = kept.some((candidate) =>
+                this.isStrictSubsequence(sequence, candidate.pageSequence || [])
+            );
+            if (!isRedundant) {
+                kept.push(workflow);
+            }
+        }
+
+        return kept;
+    }
+
+    private static isStrictSubsequence(candidate: string[], container: string[]): boolean {
+        if (candidate.length === 0 || candidate.length >= container.length) return false;
+
+        let index = 0;
+        for (const url of container) {
+            if (url === candidate[index]) {
+                index++;
+                if (index === candidate.length) return true;
+            }
+        }
+        return false;
     }
 }

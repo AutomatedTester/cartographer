@@ -86,6 +86,10 @@ const CrawlMultiPageInput = z.object({
   startUrl: z.string().transform((url) => normalizeUrl(url)).pipe(z.string().url({ message: "A valid URL is required." })),
   maxPages: z.number().int().min(2).max(50).optional().default(10),
   maxDepth: z.number().int().min(1).max(5).optional().default(3),
+  pageLoadTimeout: z.number().int().min(5000).max(180000).optional().default(30000),
+  scriptTimeoutMs: z.number().int().min(10000).max(300000).optional().default(120000),
+  analysisTimeoutMs: z.number().int().min(5000).max(240000).optional().default(90000),
+  modelLoadTimeoutMs: z.number().int().min(1000).max(120000).optional().default(5000),
   detectWorkflows: z.boolean().optional().default(true),
   workflowStrategy: z.enum(["heuristic", "ml-based", "both"]).optional().default("both"),
   enableAutoLogin: z.boolean().optional().default(true),
@@ -210,6 +214,26 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             default: 3,
             minimum: 1,
             maximum: 5,
+          },
+          pageLoadTimeout: {
+            type: "number",
+            description: "Page load timeout in milliseconds (default: 30000).",
+            default: 30000,
+          },
+          scriptTimeoutMs: {
+            type: "number",
+            description: "Selenium async script timeout in milliseconds (default: 120000).",
+            default: 120000,
+          },
+          analysisTimeoutMs: {
+            type: "number",
+            description: "In-browser analyzer watchdog timeout in milliseconds (default: 90000).",
+            default: 90000,
+          },
+          modelLoadTimeoutMs: {
+            type: "number",
+            description: "ML model initialization timeout before heuristic fallback (default: 30000).",
+            default: 30000,
           },
           detectWorkflows: {
             type: "boolean",
@@ -447,13 +471,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   if (name === "crawl_multi_page") {
-    const { startUrl, maxPages, maxDepth, detectWorkflows, workflowStrategy, enableAutoLogin, credentials, format } = CrawlMultiPageInput.parse(args);
+    const {
+      startUrl,
+      maxPages,
+      maxDepth,
+      pageLoadTimeout,
+      scriptTimeoutMs,
+      analysisTimeoutMs,
+      modelLoadTimeoutMs,
+      detectWorkflows,
+      workflowStrategy,
+      enableAutoLogin,
+      credentials,
+      format,
+    } = CrawlMultiPageInput.parse(args);
 
     try {
       const crawler = new MultiPageCrawler({
         startUrl,
         maxPages,
         maxDepth,
+          pageLoadTimeout,
+          scriptTimeoutMs,
+          analysisTimeoutMs,
+          modelLoadTimeoutMs,
         detectWorkflows,
         workflowStrategy,
         enableAutoLogin,
@@ -480,6 +521,22 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       } else {
         // Markdown format
         output = formatMultiPageCrawlMarkdown(result, sessionId);
+      }
+
+      const zeroPageFailure =
+        result.summary.pagesVisited === 0 &&
+        (result.crawlErrors?.length || 0) > 0;
+
+      if (zeroPageFailure) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: output,
+            },
+          ],
+          isError: true,
+        };
       }
 
       return {
@@ -687,7 +744,7 @@ function formatTestResultsMarkdown(summary: TestExecutionSummary): string {
 }
 
 function formatMultiPageCrawlMarkdown(result: MultiPageCrawlResult, sessionId: string): string {
-  const { session, detectedWorkflows, inferredJourneys, summary } = result;
+  const { session, detectedWorkflows, inferredJourneys, summary, crawlErrors } = result;
 
   let markdown = `# Multi-Page Crawl Results\n\n`;
   markdown += `**Session ID:** \`${sessionId}\`\n`;
@@ -697,10 +754,19 @@ function formatMultiPageCrawlMarkdown(result: MultiPageCrawlResult, sessionId: s
   markdown += `| Metric | Count |\n`;
   markdown += `|--------|-------|\n`;
   markdown += `| Pages Visited | ${summary.pagesVisited} |\n`;
+  markdown += `| Failed Pages | ${summary.failedPages || 0} |\n`;
   markdown += `| Total Elements | ${summary.totalElements} |\n`;
   markdown += `| High-Intent Elements | ${summary.highIntentElements} |\n`;
   markdown += `| Workflows Detected | ${summary.workflowsDetected} |\n`;
   markdown += `| Estimated User Journeys | ${summary.estimatedUserJourneys} |\n\n`;
+
+  if (crawlErrors && crawlErrors.length > 0) {
+    markdown += `## Crawl Errors\n\n`;
+    for (const err of crawlErrors.slice(0, 10)) {
+      markdown += `- **${err.phase.toUpperCase()}** ${err.url} (depth ${err.depth}): ${err.message}\n`;
+    }
+    markdown += `\n`;
+  }
 
   if (detectedWorkflows.length > 0) {
     markdown += `## Detected Workflows\n\n`;
