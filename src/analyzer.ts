@@ -46,6 +46,15 @@ export class DomAnalyzer {
   private static globalDevice: 'webnn' | 'webgpu' | 'wasm' | 'none' = 'none';
   private static globalModelLoadTime: number = 0;
 
+  private async withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+    return await Promise.race([
+      promise,
+      new Promise<T>((_, reject) => {
+        setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs);
+      }),
+    ]);
+  }
+
   /**
    * Check if WebNN is supported in the current browser environment.
    * Prevents timeouts by detecting unavailable devices early.
@@ -79,10 +88,12 @@ export class DomAnalyzer {
   }
 
   /** Pre-load the embedding model so the first analysis call is fast. */
-  async init(): Promise<void> {
+  async init(options: { modelLoadTimeoutMs?: number } = {}): Promise<void> {
     if (typeof window === "undefined") {
       throw new Error("[analyzer] This module must run in a browser environment.");
     }
+
+    const modelLoadTimeoutMs = options.modelLoadTimeoutMs ?? 30_000;
 
     // PHASE 1 OPTIMIZATION: Initialize embedding cache
     if (!this.cache) {
@@ -101,7 +112,24 @@ export class DomAnalyzer {
 
     // PHASE 2 OPTIMIZATION: Wait for concurrent init calls to complete
     if (DomAnalyzer.modelLoadPromise) {
-      await DomAnalyzer.modelLoadPromise;
+      try {
+        await this.withTimeout(
+          DomAnalyzer.modelLoadPromise,
+          modelLoadTimeoutMs,
+          "Shared model initialization"
+        );
+      } catch (err) {
+        console.warn(
+          `[analyzer] Shared model load timed out; falling back to heuristics: ${
+            err instanceof Error ? err.message : String(err)
+          }`
+        );
+        this.extractor = null;
+        this.device = 'none';
+        this.modelLoadTime = 0;
+        DomAnalyzer.modelLoadPromise = null;
+        return;
+      }
       this.extractor = DomAnalyzer.globalModelCache!;
       this.device = DomAnalyzer.globalDevice;
       this.modelLoadTime = DomAnalyzer.globalModelLoadTime;
@@ -110,14 +138,33 @@ export class DomAnalyzer {
     }
 
     // Start loading model and cache the promise
-    DomAnalyzer.modelLoadPromise = this.loadAndCacheModel();
-    await DomAnalyzer.modelLoadPromise;
-    this.extractor = DomAnalyzer.globalModelCache!;
+    DomAnalyzer.modelLoadPromise = this.loadAndCacheModel(modelLoadTimeoutMs);
+    try {
+      await this.withTimeout(
+        DomAnalyzer.modelLoadPromise,
+        modelLoadTimeoutMs + 2000,
+        "Model initialization"
+      );
+    } catch (err) {
+      console.warn(
+        `[analyzer] Model init failed; using heuristic fallback: ${
+          err instanceof Error ? err.message : String(err)
+        }`
+      );
+      this.extractor = null;
+      this.device = 'none';
+      this.modelLoadTime = 0;
+      DomAnalyzer.modelLoadPromise = null;
+      return;
+    }
+
+    this.extractor = DomAnalyzer.globalModelCache;
     this.device = DomAnalyzer.globalDevice;
     this.modelLoadTime = DomAnalyzer.globalModelLoadTime;
+    DomAnalyzer.modelLoadPromise = null;
   }
 
-  private async loadAndCacheModel(): Promise<void> {
+  private async loadAndCacheModel(modelLoadTimeoutMs: number): Promise<void> {
     const initStartTime = performance.now();
 
     // Check WebNN support first to avoid timeout delays
@@ -138,13 +185,17 @@ export class DomAnalyzer {
       try {
         // PHASE 2 OPTIMIZATION: Advanced pipeline options
         // float16: Reduce GPU memory usage
-        DomAnalyzer.globalModelCache = (await (pipeline as any)(
-          "feature-extraction",
-          selectedModel,
-          {
-            device: device as any,
-            dtype: device === 'wasm' ? 'fp32' : 'fp16', // fp16 on GPU, fp32 on CPU
-          }
+        DomAnalyzer.globalModelCache = (await this.withTimeout(
+          (pipeline as any)(
+            "feature-extraction",
+            selectedModel,
+            {
+              device: device as any,
+              dtype: device === 'wasm' ? 'fp32' : 'fp16', // fp16 on GPU, fp32 on CPU
+            }
+          ) as Promise<FeatureExtractionPipeline>,
+          modelLoadTimeoutMs,
+          `Model load on ${device}`
         )) as FeatureExtractionPipeline;
         DomAnalyzer.globalDevice = device;
         DomAnalyzer.globalModelLoadTime = performance.now() - initStartTime;
