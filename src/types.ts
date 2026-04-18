@@ -100,6 +100,12 @@ export interface AnalysisMetrics {
     elementsAnalyzed: number;
     /** Number of high-intent elements after clustering */
     elementsClustered: number;
+    /**
+     * Number of LLM/API tokens consumed during analysis.
+     * This is always 0 because all ML inference runs locally in the browser
+     * via WebNN, WebGPU, or WASM — no cloud API calls are made.
+     */
+    tokensUsed: number;
 }
 
 /** Full output produced by the analyzer. */

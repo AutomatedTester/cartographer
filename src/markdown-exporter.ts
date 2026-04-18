@@ -96,12 +96,19 @@ export class MarkdownExporter {
                 )
                 : 0;
 
+        const deviceLabel = result.metrics?.device
+            ? result.metrics.device.toUpperCase()
+            : 'WASM';
+        const tokensUsed = result.metrics?.tokensUsed ?? 0;
+
         return `## Executive Summary
 
 - **Total Elements Analyzed:** ${elementCount}
 - **Auto-Generated Test Cases:** ${testCount}
 - **Average Intent Score:** ${avgScore}/100
 - **Page Title:** ${result.title}
+- **Analysis Device:** ${deviceLabel} (browser-side ML — no cloud API calls)
+- **LLM Tokens Used:** ${tokensUsed} ✅ (all inference runs locally via ${deviceLabel})
 
 This report identifies high-intent user interaction points and generates starter test cases that can be customized and extended.
 `;
@@ -254,6 +261,20 @@ This report identifies high-intent user interaction points and generates starter
         lines.push(
             `- Average: ${Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)}`
         );
+
+        // WebNN performance metrics
+        if (result.metrics) {
+            const m = result.metrics;
+            lines.push("");
+            lines.push("### WebNN Performance Metrics");
+            lines.push(`- **Inference Device:** ${m.device.toUpperCase()}`);
+            lines.push(`- **LLM Tokens Used:** ${m.tokensUsed} (browser-side ML, zero cloud API calls)`);
+            lines.push(`- **Model Load Time:** ${m.modelLoadTime.toFixed(0)}ms`);
+            lines.push(`- **DOM Analysis Time:** ${m.analysisTime.toFixed(0)}ms`);
+            lines.push(`- **Deduplication Time:** ${m.deduplicationTime.toFixed(0)}ms`);
+            lines.push(`- **Elements Analyzed:** ${m.elementsAnalyzed}`);
+            lines.push(`- **Elements After Clustering:** ${m.elementsClustered}`);
+        }
 
         return lines.join("\n");
     }

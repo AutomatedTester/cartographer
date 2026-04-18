@@ -386,6 +386,9 @@ export class DomAnalyzer {
       deduplicationTime,
       elementsAnalyzed,
       elementsClustered: deduped.length,
+      // All ML inference runs locally in the browser via WebNN/WebGPU/WASM.
+      // No cloud LLM API calls are made, so token usage is always zero.
+      tokensUsed: 0,
     };
 
     // Log cache stats if available
