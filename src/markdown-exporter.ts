@@ -267,7 +267,7 @@ This report identifies high-intent user interaction points and generates starter
             const m = result.metrics;
             lines.push("");
             lines.push("### WebNN Performance Metrics");
-            lines.push(`- **Inference Device:** ${m.device.toUpperCase()}`);
+            lines.push(`- **Inference Device:** ${(m.device || 'wasm').toUpperCase()}`);
             lines.push(`- **LLM Tokens Used:** ${m.tokensUsed} (browser-side ML, zero cloud API calls)`);
             lines.push(`- **Model Load Time:** ${m.modelLoadTime.toFixed(0)}ms`);
             lines.push(`- **DOM Analysis Time:** ${m.analysisTime.toFixed(0)}ms`);
