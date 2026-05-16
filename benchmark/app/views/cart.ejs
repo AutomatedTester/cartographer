@@ -1,0 +1,78 @@
+<%- include('partials/header', { title }) %>
+
+<section id="cart-page">
+
+  <h1 id="cart-heading">Your Cart</h1>
+
+  <% if (cart.length === 0) { %>
+    <div id="cart-empty" class="empty-state">
+      <p>Your cart is empty.</p>
+      <a id="continue-shopping-empty" href="/products" class="btn btn-primary">Start Shopping</a>
+    </div>
+  <% } else { %>
+
+    <div class="cart-layout">
+
+      <div id="cart-items" class="cart-items">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Product</th>
+              <th>Price</th>
+              <th>Quantity</th>
+              <th>Subtotal</th>
+              <th>Remove</th>
+            </tr>
+          </thead>
+          <tbody>
+            <% cart.forEach(item => { %>
+            <tr id="cart-item-<%= item.productId %>" class="cart-item" data-product-id="<%= item.productId %>">
+              <td>
+                <span class="cart-item-image" aria-hidden="true"><%= item.image %></span>
+                <a id="cart-item-link-<%= item.productId %>"
+                   href="/products/<%= item.productId %>"
+                   class="cart-item-name"><%= item.name %></a>
+              </td>
+              <td id="cart-item-price-<%= item.productId %>">$<%= item.price.toFixed(2) %></td>
+              <td id="cart-item-qty-<%= item.productId %>"><%= item.quantity %></td>
+              <td id="cart-item-subtotal-<%= item.productId %>">
+                $<%= (item.price * item.quantity).toFixed(2) %>
+              </td>
+              <td>
+                <form action="/cart/remove" method="POST">
+                  <input type="hidden" name="productId" value="<%= item.productId %>">
+                  <button id="remove-item-<%= item.productId %>" type="submit"
+                          class="btn btn-danger btn-sm" aria-label="Remove <%= item.name %>">
+                    Remove
+                  </button>
+                </form>
+              </td>
+            </tr>
+            <% }) %>
+          </tbody>
+        </table>
+      </div>
+
+      <div id="cart-summary" class="cart-summary">
+        <h2 class="cart-summary-title">Order Summary</h2>
+        <dl class="cart-totals">
+          <dt>Subtotal</dt>     <dd id="cart-subtotal">$<%= total %></dd>
+          <dt>Shipping</dt>     <dd id="cart-shipping">Calculated at checkout</dd>
+          <dt class="total-label">Total</dt>
+          <dd id="cart-total" class="total-value">$<%= total %></dd>
+        </dl>
+        <a id="checkout-btn" href="/checkout" class="btn btn-primary btn-full btn-large">
+          Proceed to Checkout
+        </a>
+        <a id="continue-shopping-btn" href="/products" class="btn btn-ghost btn-full">
+          Continue Shopping
+        </a>
+      </div>
+
+    </div>
+
+  <% } %>
+
+</section>
+
+<%- include('partials/footer') %>

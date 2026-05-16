@@ -1,0 +1,235 @@
+{
+  "_meta": {
+    "version": "1.0.0",
+    "app": "BenchmarkShop",
+    "description": "Ground-truth user journey definitions for benchmark scoring. Each journey has a canonical page sequence and exact selector steps. A tool 'finds' a journey when it identifies >= 80% of the pageSequence in the correct order.",
+    "baseUrl": "http://localhost:3000",
+    "credentials": {
+      "username": "admin",
+      "password": "password123"
+    },
+    "testCard": {
+      "number": "4242 4242 4242 4242",
+      "expiry": "12/28",
+      "cvv": "123",
+      "name": "Test User"
+    }
+  },
+
+  "journeys": [
+    {
+      "id": "J1",
+      "name": "Login Flow",
+      "description": "User navigates from homepage, clicks Sign In, enters credentials, and reaches the authenticated dashboard.",
+      "pageSequence": ["/", "/login", "/dashboard"],
+      "tags": ["authentication", "login"],
+      "steps": [
+        { "step": 1, "action": "navigate",       "url": "/"                                                                    },
+        { "step": 2, "action": "assertVisible",  "selector": "#nav-signin",       "description": "Sign In button in nav"      },
+        { "step": 3, "action": "click",          "selector": "#nav-signin"                                                     },
+        { "step": 4, "action": "assertUrl",      "path": "/login"                                                              },
+        { "step": 5, "action": "assertVisible",  "selector": "#login-form",       "description": "Login form present"         },
+        { "step": 6, "action": "fill",           "selector": "#username",         "value": "admin"                            },
+        { "step": 7, "action": "fill",           "selector": "#password",         "value": "password123"                      },
+        { "step": 8, "action": "click",          "selector": "#login-submit"                                                   },
+        { "step": 9, "action": "assertUrl",      "path": "/dashboard"                                                          },
+        { "step": 10,"action": "assertVisible",  "selector": "#dashboard",        "description": "Dashboard section visible"  },
+        { "step": 11,"action": "assertContains", "selector": "#welcome-message",  "text": "Admin User"                        }
+      ],
+      "successCriteria": {
+        "finalPath": "/dashboard",
+        "requiredElements": ["#dashboard", "#welcome-message", "#account-card"]
+      },
+      "errorScenario": {
+        "description": "Wrong password shows error message",
+        "steps": [
+          { "action": "navigate",      "url": "/login"       },
+          { "action": "fill",          "selector": "#username", "value": "admin"   },
+          { "action": "fill",          "selector": "#password", "value": "wrong"   },
+          { "action": "click",         "selector": "#login-submit"                  },
+          { "action": "assertVisible", "selector": "#login-error"                   }
+        ]
+      }
+    },
+
+    {
+      "id": "J2",
+      "name": "Multi-step Registration",
+      "description": "User completes a 3-step account creation: personal info → address → preferences → confirmation.",
+      "pageSequence": ["/register", "/register/step2", "/register/step3", "/register/complete"],
+      "tags": ["registration", "multi-step", "form"],
+      "steps": [
+        { "step": 1,  "action": "navigate",      "url": "/register"                                             },
+        { "step": 2,  "action": "assertVisible", "selector": "#register-form-step1",  "description": "Step 1 form" },
+        { "step": 3,  "action": "assertVisible", "selector": "#reg-step-1.step-active"                          },
+        { "step": 4,  "action": "fill",          "selector": "#firstName",  "value": "Jane"                     },
+        { "step": 5,  "action": "fill",          "selector": "#lastName",   "value": "Smith"                    },
+        { "step": 6,  "action": "fill",          "selector": "#email",      "value": "jane@test.com"            },
+        { "step": 7,  "action": "click",         "selector": "#step1-submit"                                    },
+        { "step": 8,  "action": "assertUrl",     "path": "/register/step2"                                      },
+        { "step": 9,  "action": "assertVisible", "selector": "#register-form-step2",  "description": "Step 2 form" },
+        { "step": 10, "action": "fill",          "selector": "#address",    "value": "123 Main Street"          },
+        { "step": 11, "action": "fill",          "selector": "#city",       "value": "San Francisco"            },
+        { "step": 12, "action": "fill",          "selector": "#zip",        "value": "94105"                    },
+        { "step": 13, "action": "select",        "selector": "#country",    "value": "US"                       },
+        { "step": 14, "action": "click",         "selector": "#step2-submit"                                    },
+        { "step": 15, "action": "assertUrl",     "path": "/register/step3"                                      },
+        { "step": 16, "action": "assertVisible", "selector": "#register-form-step3",  "description": "Step 3 form" },
+        { "step": 17, "action": "fill",          "selector": "#password",   "value": "secure123"               },
+        { "step": 18, "action": "check",         "selector": "#newsletter"                                      },
+        { "step": 19, "action": "click",         "selector": "#step3-submit"                                    },
+        { "step": 20, "action": "assertUrl",     "path": "/register/complete"                                   },
+        { "step": 21, "action": "assertVisible", "selector": "#registration-complete"                           },
+        { "step": 22, "action": "assertContains","selector": "#registered-name", "text": "Jane Smith"           }
+      ],
+      "successCriteria": {
+        "finalPath": "/register/complete",
+        "requiredElements": ["#registration-complete", "#registered-name", "#registered-email"]
+      }
+    },
+
+    {
+      "id": "J3",
+      "name": "Product Browse → Cart → Checkout",
+      "description": "User browses products, views a product detail, adds to cart, completes checkout with shipping and payment.",
+      "pageSequence": ["/products", "/products/1", "/cart", "/checkout", "/checkout/payment", "/checkout/confirm"],
+      "tags": ["ecommerce", "checkout", "purchase", "cart"],
+      "steps": [
+        { "step": 1,  "action": "navigate",      "url": "/products"                                                           },
+        { "step": 2,  "action": "assertVisible", "selector": "#product-list",       "description": "Product grid visible"    },
+        { "step": 3,  "action": "assertVisible", "selector": "#product-1",          "description": "First product card"      },
+        { "step": 4,  "action": "click",         "selector": "#view-product-1"                                               },
+        { "step": 5,  "action": "assertUrl",     "path": "/products/1"                                                       },
+        { "step": 6,  "action": "assertVisible", "selector": "#product-detail"                                               },
+        { "step": 7,  "action": "assertVisible", "selector": "#product-name"                                                 },
+        { "step": 8,  "action": "assertVisible", "selector": "#product-price"                                                },
+        { "step": 9,  "action": "click",         "selector": "#add-to-cart-btn"                                              },
+        { "step": 10, "action": "assertUrl",     "path": "/cart"                                                             },
+        { "step": 11, "action": "assertVisible", "selector": "#cart-items"                                                   },
+        { "step": 12, "action": "assertVisible", "selector": "#cart-item-1"                                                  },
+        { "step": 13, "action": "assertVisible", "selector": "#cart-total"                                                   },
+        { "step": 14, "action": "click",         "selector": "#checkout-btn"                                                 },
+        { "step": 15, "action": "assertUrl",     "path": "/checkout"                                                         },
+        { "step": 16, "action": "assertVisible", "selector": "#shipping-form"                                               },
+        { "step": 17, "action": "fill",          "selector": "#firstName",  "value": "Jane"                                 },
+        { "step": 18, "action": "fill",          "selector": "#lastName",   "value": "Smith"                                },
+        { "step": 19, "action": "fill",          "selector": "#address",    "value": "123 Main Street"                      },
+        { "step": 20, "action": "fill",          "selector": "#city",       "value": "San Francisco"                        },
+        { "step": 21, "action": "fill",          "selector": "#zip",        "value": "94105"                                },
+        { "step": 22, "action": "select",        "selector": "#country",    "value": "US"                                   },
+        { "step": 23, "action": "click",         "selector": "#shipping-submit"                                              },
+        { "step": 24, "action": "assertUrl",     "path": "/checkout/payment"                                                 },
+        { "step": 25, "action": "assertVisible", "selector": "#payment-form"                                                 },
+        { "step": 26, "action": "fill",          "selector": "#cardName",   "value": "Jane Smith"                           },
+        { "step": 27, "action": "fill",          "selector": "#cardNumber", "value": "4242 4242 4242 4242"                  },
+        { "step": 28, "action": "fill",          "selector": "#cardExpiry", "value": "12/28"                                },
+        { "step": 29, "action": "fill",          "selector": "#cardCvv",    "value": "123"                                  },
+        { "step": 30, "action": "click",         "selector": "#payment-submit"                                               },
+        { "step": 31, "action": "assertUrl",     "path": "/checkout/confirm"                                                 },
+        { "step": 32, "action": "assertVisible", "selector": "#order-confirmation"                                           },
+        { "step": 33, "action": "assertVisible", "selector": "#order-number"                                                 }
+      ],
+      "successCriteria": {
+        "finalPath": "/checkout/confirm",
+        "requiredElements": ["#order-confirmation", "#order-number", "#order-total"]
+      }
+    },
+
+    {
+      "id": "J4",
+      "name": "Navigation Menu Exploration",
+      "description": "User uses the main navigation to explore sub-pages: Home → Products → Deals → About → Contact.",
+      "pageSequence": ["/", "/products", "/deals", "/about", "/contact"],
+      "tags": ["navigation", "menu", "browsing"],
+      "steps": [
+        { "step": 1,  "action": "navigate",      "url": "/"                                                     },
+        { "step": 2,  "action": "assertVisible", "selector": "#main-nav",      "description": "Nav is visible"  },
+        { "step": 3,  "action": "assertVisible", "selector": "#nav-home"                                         },
+        { "step": 4,  "action": "assertVisible", "selector": "#nav-products"                                     },
+        { "step": 5,  "action": "assertVisible", "selector": "#nav-deals"                                        },
+        { "step": 6,  "action": "assertVisible", "selector": "#nav-about"                                        },
+        { "step": 7,  "action": "assertVisible", "selector": "#nav-contact"                                      },
+        { "step": 8,  "action": "click",         "selector": "#nav-products"                                     },
+        { "step": 9,  "action": "assertUrl",     "path": "/products"                                             },
+        { "step": 10, "action": "assertVisible", "selector": "#products-page"                                    },
+        { "step": 11, "action": "click",         "selector": "#nav-deals"                                        },
+        { "step": 12, "action": "assertUrl",     "path": "/deals"                                                },
+        { "step": 13, "action": "assertVisible", "selector": "#deals-page"                                       },
+        { "step": 14, "action": "click",         "selector": "#nav-about"                                        },
+        { "step": 15, "action": "assertUrl",     "path": "/about"                                                },
+        { "step": 16, "action": "assertVisible", "selector": "#about-page"                                       },
+        { "step": 17, "action": "click",         "selector": "#nav-contact"                                      },
+        { "step": 18, "action": "assertUrl",     "path": "/contact"                                              },
+        { "step": 19, "action": "assertVisible", "selector": "#contact-page"                                     },
+        { "step": 20, "action": "assertVisible", "selector": "#contact-form"                                     }
+      ],
+      "successCriteria": {
+        "finalPath": "/contact",
+        "requiredElements": ["#contact-form", "#contact-submit"],
+        "allPathsVisited": ["/products", "/deals", "/about", "/contact"]
+      }
+    },
+
+    {
+      "id": "J5",
+      "name": "Search → Results → Product Detail",
+      "description": "User searches for a product from the homepage, views results, and navigates to a product detail page.",
+      "pageSequence": ["/", "/search", "/products/:id"],
+      "tags": ["search", "discovery", "navigation"],
+      "steps": [
+        { "step": 1,  "action": "navigate",      "url": "/"                                                              },
+        { "step": 2,  "action": "assertVisible", "selector": "#search-form",      "description": "Search bar visible"   },
+        { "step": 3,  "action": "assertVisible", "selector": "#search-input"                                             },
+        { "step": 4,  "action": "fill",          "selector": "#search-input",     "value": "laptop"                     },
+        { "step": 5,  "action": "click",         "selector": "#search-btn"                                               },
+        { "step": 6,  "action": "assertUrlContains", "path": "/search",           "param": "q=laptop"                   },
+        { "step": 7,  "action": "assertVisible", "selector": "#search-results-page"                                      },
+        { "step": 8,  "action": "assertVisible", "selector": "#search-results"                                           },
+        { "step": 9,  "action": "assertVisible", "selector": "#search-count"                                             },
+        { "step": 10, "action": "assertVisible", "selector": ".search-result-item"                                       },
+        { "step": 11, "action": "click",         "selector": "#view-result-1",    "description": "View first result"    },
+        { "step": 12, "action": "assertUrlMatches", "pattern": "/products/\\d+"                                          },
+        { "step": 13, "action": "assertVisible", "selector": "#product-detail"                                           },
+        { "step": 14, "action": "assertVisible", "selector": "#product-name"                                             },
+        { "step": 15, "action": "assertVisible", "selector": "#add-to-cart-btn"                                          }
+      ],
+      "successCriteria": {
+        "finalPathPattern": "/products/\\d+",
+        "requiredElements": ["#product-detail", "#product-name", "#product-price", "#add-to-cart-btn"]
+      }
+    }
+  ],
+
+  "scoringRubric": {
+    "journeyDetection": {
+      "description": "Does the tool identify this journey exists?",
+      "score": { "found": 1, "notFound": 0 }
+    },
+    "pageSequenceAccuracy": {
+      "description": "What fraction of the canonical pageSequence does the tool recover, in order?",
+      "score": "foundPages / totalPages (0.0–1.0)"
+    },
+    "testExecutability": {
+      "description": "Does the generated test actually pass when run against the app?",
+      "score": { "passes": 1, "fails": 0, "notGenerated": 0 }
+    },
+    "locatorStability": {
+      "description": "Does the generated test still pass after one CSS-class rename?",
+      "mutationApplied": "Rename CSS class 'product-card' to 'product-item' in style.css",
+      "score": { "stillPasses": 1, "breaks": 0 }
+    }
+  },
+
+  "stableLocators": {
+    "note": "These IDs are frozen across benchmark versions. Tools generating tests using these selectors will score higher on locatorStability.",
+    "navigation": ["#main-nav", "#nav-home", "#nav-products", "#nav-deals", "#nav-about", "#nav-contact", "#nav-signin", "#nav-cart", "#search-input", "#search-btn"],
+    "loginForm":  ["#login-form", "#username", "#password", "#login-submit", "#login-error"],
+    "dashboard":  ["#dashboard", "#welcome-message", "#account-card"],
+    "products":   ["#product-list", "#product-{id}", "#add-to-cart-{id}", "#view-product-{id}"],
+    "productDetail": ["#product-detail", "#product-name", "#product-price", "#add-to-cart-btn", "#add-to-cart-form"],
+    "cart":       ["#cart-items", "#cart-item-{id}", "#cart-total", "#checkout-btn"],
+    "checkout":   ["#shipping-form", "#firstName", "#lastName", "#address", "#city", "#zip", "#country", "#shipping-submit", "#payment-form", "#cardName", "#cardNumber", "#cardExpiry", "#cardCvv", "#payment-submit", "#order-confirmation", "#order-number"],
+    "register":   ["#register-form-step1", "#register-form-step2", "#register-form-step3", "#step1-submit", "#step2-submit", "#step3-submit", "#registration-complete"],
+    "search":     ["#search-results-page", "#search-results", "#search-count", "#search-query", ".search-result-item"]
+  }
+}

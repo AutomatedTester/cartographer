@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %> | BenchmarkShop</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<header id="site-header">
+  <nav id="main-nav">
+    <div class="container nav-inner">
+
+      <a id="nav-logo" href="/" class="nav-logo">BenchmarkShop</a>
+
+      <form id="search-form" action="/search" method="GET" class="nav-search" role="search">
+        <input id="search-input" type="search" name="q" placeholder="Search products…" autocomplete="off" aria-label="Search products">
+        <button id="search-btn" type="submit" aria-label="Submit search">Search</button>
+      </form>
+
+      <ul id="nav-links" class="nav-links" role="menubar">
+        <li role="none"><a id="nav-home"     href="/"        role="menuitem">Home</a></li>
+        <li role="none"><a id="nav-products" href="/products" role="menuitem">Products</a></li>
+        <li role="none"><a id="nav-deals"    href="/deals"    role="menuitem">Deals</a></li>
+        <li role="none"><a id="nav-about"    href="/about"    role="menuitem">About</a></li>
+        <li role="none"><a id="nav-contact"  href="/contact"  role="menuitem">Contact</a></li>
+      </ul>
+
+      <div class="nav-actions">
+        <a id="nav-cart" href="/cart" class="nav-cart-btn" aria-label="Shopping cart">
+          🛒 <span id="cart-count" class="cart-badge"><%= cartCount %></span>
+        </a>
+        <% if (user) { %>
+          <a id="nav-dashboard" href="/dashboard" class="btn btn-secondary">Dashboard</a>
+          <a id="nav-logout"    href="/logout"    class="btn btn-ghost">Sign Out</a>
+        <% } else { %>
+          <a id="nav-signin"   href="/login"    class="btn btn-primary">Sign In</a>
+          <a id="nav-register" href="/register" class="btn btn-ghost">Register</a>
+        <% } %>
+      </div>
+
+    </div>
+  </nav>
+</header>
+
+<main id="main-content" class="main-content">
+  <div class="container">

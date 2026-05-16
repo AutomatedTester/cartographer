@@ -1,0 +1,65 @@
+<%- include('partials/header', { title }) %>
+
+<section id="order-confirmation" class="confirmation-page">
+
+  <div class="steps-indicator" aria-label="Checkout progress">
+    <div id="step-shipping" class="step step-done">1. Shipping ✓</div>
+    <div id="step-payment"  class="step step-done">2. Payment ✓</div>
+    <div id="step-confirm"  class="step step-active">3. Confirmation</div>
+  </div>
+
+  <div class="confirmation-content">
+    <div class="confirmation-icon" aria-hidden="true">✅</div>
+    <h1 id="confirmation-heading">Order Confirmed!</h1>
+    <p  id="confirmation-message" class="confirmation-message">
+      Thank you for your order. We'll send a confirmation email shortly.
+    </p>
+    <p class="order-number-label">Order Number:
+      <strong id="order-number"><%= order.orderNumber %></strong>
+    </p>
+  </div>
+
+  <div id="order-summary" class="order-summary">
+    <h2>Order Summary</h2>
+
+    <table class="data-table">
+      <thead>
+        <tr><th>Item</th><th>Qty</th><th>Price</th><th>Subtotal</th></tr>
+      </thead>
+      <tbody>
+        <% order.items.forEach(item => { %>
+        <tr id="confirm-item-<%= item.productId %>">
+          <td><span aria-hidden="true"><%= item.image %></span> <%= item.name %></td>
+          <td><%= item.quantity %></td>
+          <td>$<%= item.price.toFixed(2) %></td>
+          <td>$<%= (item.price * item.quantity).toFixed(2) %></td>
+        </tr>
+        <% }) %>
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="3"><strong>Total</strong></td>
+          <td><strong id="order-total">$<%= order.total %></strong></td>
+        </tr>
+      </tfoot>
+    </table>
+
+    <div id="shipping-address-summary" class="shipping-summary">
+      <h3>Shipping To</h3>
+      <address>
+        <%= order.shipping.firstName %> <%= order.shipping.lastName %><br>
+        <%= order.shipping.address %><br>
+        <%= order.shipping.city %>, <%= order.shipping.zip %><br>
+        <%= order.shipping.country %>
+      </address>
+    </div>
+  </div>
+
+  <div class="confirmation-actions">
+    <a id="continue-shopping-confirm" href="/products" class="btn btn-primary">Continue Shopping</a>
+    <a id="go-to-dashboard-confirm"   href="/dashboard" class="btn btn-secondary">Go to Dashboard</a>
+  </div>
+
+</section>
+
+<%- include('partials/footer') %>

@@ -1,0 +1,38 @@
+<%- include('partials/header', { title }) %>
+
+<div class="auth-wrapper">
+  <section id="login-section" class="auth-card">
+
+    <h1 id="login-heading" class="auth-title">Sign In</h1>
+    <p class="auth-subtitle">New here? <a id="register-link" href="/register">Create an account</a></p>
+
+    <% if (error) { %>
+    <div id="login-error" class="alert alert-error" role="alert"><%= error %></div>
+    <% } %>
+
+    <form id="login-form" action="/login" method="POST" novalidate>
+      <input type="hidden" name="next" value="<%= next %>">
+
+      <div class="form-group">
+        <label for="username">Username</label>
+        <input id="username" type="text" name="username" autocomplete="username"
+               placeholder="Enter your username" required aria-required="true">
+      </div>
+
+      <div class="form-group">
+        <label for="password">Password</label>
+        <input id="password" type="password" name="password" autocomplete="current-password"
+               placeholder="Enter your password" required aria-required="true">
+      </div>
+
+      <button id="login-submit" type="submit" class="btn btn-primary btn-full">Sign In</button>
+    </form>
+
+    <div class="auth-hint">
+      <p>Demo credentials: <code>admin</code> / <code>password123</code></p>
+    </div>
+
+  </section>
+</div>
+
+<%- include('partials/footer') %>

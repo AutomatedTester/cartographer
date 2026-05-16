@@ -1,0 +1,62 @@
+<%- include('partials/header', { title }) %>
+
+<section id="register-page" class="auth-wrapper">
+  <div class="auth-card">
+
+    <div class="steps-indicator" aria-label="Registration progress">
+      <div id="reg-step-1" class="step step-done">1. Personal Info ✓</div>
+      <div id="reg-step-2" class="step step-active">2. Address</div>
+      <div id="reg-step-3" class="step">3. Preferences</div>
+    </div>
+
+    <h1 id="register-heading">Your Address</h1>
+
+    <% if (error) { %>
+    <div id="register-error" class="alert alert-error" role="alert"><%= error %></div>
+    <% } %>
+
+    <form id="register-form-step2" action="/register/step2" method="POST" novalidate>
+
+      <div class="form-group">
+        <label for="address">Street Address</label>
+        <input id="address" type="text" name="address" autocomplete="street-address"
+               placeholder="123 Main Street" required aria-required="true">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="city">City</label>
+          <input id="city" type="text" name="city" autocomplete="address-level2"
+                 placeholder="San Francisco" required aria-required="true">
+        </div>
+        <div class="form-group">
+          <label for="zip">ZIP / Postal Code</label>
+          <input id="zip" type="text" name="zip" autocomplete="postal-code"
+                 placeholder="94105" required aria-required="true">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="country">Country</label>
+        <select id="country" name="country" autocomplete="country" required aria-required="true">
+          <option value="">Select country…</option>
+          <option value="US">United States</option>
+          <option value="GB">United Kingdom</option>
+          <option value="CA">Canada</option>
+          <option value="AU">Australia</option>
+          <option value="IN">India</option>
+          <option value="DE">Germany</option>
+          <option value="FR">France</option>
+        </select>
+      </div>
+
+      <button id="step2-submit" type="submit" class="btn btn-primary btn-full">
+        Next: Preferences &rarr;
+      </button>
+      <a id="back-to-step1" href="/register" class="btn btn-ghost btn-full">&larr; Back</a>
+    </form>
+
+  </div>
+</section>
+
+<%- include('partials/footer') %>

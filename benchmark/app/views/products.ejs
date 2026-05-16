@@ -1,0 +1,70 @@
+<%- include('partials/header', { title }) %>
+
+<section id="products-page">
+
+  <div class="page-header">
+    <h1 id="products-heading">Products</h1>
+  </div>
+
+  <div class="products-layout">
+
+    <aside id="products-sidebar" class="sidebar">
+      <h2 class="sidebar-title">Filter by Category</h2>
+      <nav id="category-filter" class="category-list">
+        <a id="filter-all" href="/products"
+           class="category-btn <%= !activeCategory ? 'active' : '' %>">All</a>
+        <% categories.forEach(cat => { %>
+        <a id="filter-<%= cat %>" href="/products?category=<%= cat %>"
+           class="category-btn <%= activeCategory === cat ? 'active' : '' %>"><%= cat %></a>
+        <% }) %>
+      </nav>
+    </aside>
+
+    <div class="products-main">
+      <div id="products-toolbar" class="products-toolbar">
+        <p id="products-count" class="products-count">
+          Showing <strong><%= products.length %></strong> product<%= products.length !== 1 ? 's' : '' %>
+        </p>
+      </div>
+
+      <% if (products.length === 0) { %>
+        <div id="no-products" class="empty-state">
+          <p>No products found.</p>
+          <a href="/products" class="btn btn-secondary">Clear filters</a>
+        </div>
+      <% } else { %>
+        <div id="product-list" class="product-grid">
+          <% products.forEach(product => { %>
+          <article id="product-<%= product.id %>" class="product-card <%= !product.inStock ? 'out-of-stock' : '' %>"
+                   data-product-id="<%= product.id %>" data-category="<%= product.category %>">
+            <div class="product-image" aria-hidden="true"><%= product.image %></div>
+            <div class="product-info">
+              <h3 id="product-name-<%= product.id %>" class="product-name"><%= product.name %></h3>
+              <p class="product-category"><%= product.category %></p>
+              <p id="product-price-<%= product.id %>" class="product-price">$<%= product.price.toFixed(2) %></p>
+              <% if (!product.inStock) { %>
+                <span id="out-of-stock-<%= product.id %>" class="badge badge-oos">Out of Stock</span>
+              <% } %>
+            </div>
+            <div class="product-actions">
+              <a id="view-product-<%= product.id %>" href="/products/<%= product.id %>"
+                 class="btn btn-secondary">View Details</a>
+              <% if (product.inStock) { %>
+              <form action="/cart/add" method="POST" style="display:inline">
+                <input type="hidden" name="productId" value="<%= product.id %>">
+                <input type="hidden" name="quantity"  value="1">
+                <button id="add-to-cart-<%= product.id %>" type="submit" class="btn btn-primary"
+                        aria-label="Add <%= product.name %> to cart">Add to Cart</button>
+              </form>
+              <% } %>
+            </div>
+          </article>
+          <% }) %>
+        </div>
+      <% } %>
+    </div>
+
+  </div>
+</section>
+
+<%- include('partials/footer') %>

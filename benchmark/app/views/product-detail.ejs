@@ -1,0 +1,54 @@
+<%- include('partials/header', { title }) %>
+
+<nav id="breadcrumb" class="breadcrumb" aria-label="Breadcrumb">
+  <a href="/">Home</a> &rsaquo;
+  <a href="/products">Products</a> &rsaquo;
+  <span aria-current="page"><%= product.name %></span>
+</nav>
+
+<section id="product-detail" class="product-detail-page" data-product-id="<%= product.id %>">
+
+  <div class="product-detail-layout">
+
+    <div id="product-image-panel" class="product-detail-image">
+      <div class="product-image-large" aria-hidden="true"><%= product.image %></div>
+    </div>
+
+    <div id="product-info-panel" class="product-detail-info">
+      <h1 id="product-name" class="product-detail-name"><%= product.name %></h1>
+      <p  id="product-category" class="product-detail-category"><%= product.category %></p>
+      <p  id="product-price"    class="product-detail-price">$<%= product.price.toFixed(2) %></p>
+      <p  id="product-description" class="product-detail-description"><%= product.description %></p>
+
+      <% if (product.inStock) { %>
+        <p id="product-availability" class="badge badge-instock">In Stock</p>
+        <form id="add-to-cart-form" action="/cart/add" method="POST" class="add-to-cart-form">
+          <input type="hidden" name="productId" value="<%= product.id %>">
+          <div class="form-group form-inline">
+            <label for="quantity">Quantity</label>
+            <input id="quantity" type="number" name="quantity" value="1" min="1" max="10"
+                   aria-label="Quantity">
+          </div>
+          <button id="add-to-cart-btn" type="submit" class="btn btn-primary btn-large">
+            Add to Cart
+          </button>
+        </form>
+      <% } else { %>
+        <p id="product-availability" class="badge badge-oos">Out of Stock</p>
+        <button id="notify-btn" type="button" class="btn btn-secondary btn-large" disabled>
+          Notify When Available
+        </button>
+      <% } %>
+
+      <div class="product-detail-actions">
+        <a id="continue-shopping-btn" href="/products" class="btn btn-ghost">
+          &larr; Continue Shopping
+        </a>
+      </div>
+    </div>
+
+  </div>
+
+</section>
+
+<%- include('partials/footer') %>

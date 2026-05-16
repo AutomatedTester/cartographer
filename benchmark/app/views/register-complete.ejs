@@ -1,0 +1,35 @@
+<%- include('partials/header', { title }) %>
+
+<section id="registration-complete" class="confirmation-page">
+
+  <div class="confirmation-icon" aria-hidden="true">🎉</div>
+  <h1 id="registration-heading">Account Created!</h1>
+  <p  id="registration-message" class="confirmation-message">
+    Welcome, <strong id="registered-name"><%= registration.firstName %> <%= registration.lastName %></strong>!
+    Your account has been successfully created.
+  </p>
+  <p class="text-muted">
+    A confirmation has been sent to <strong id="registered-email"><%= registration.email %></strong>.
+  </p>
+
+  <div id="registration-summary" class="confirmation-summary">
+    <h2>Account Summary</h2>
+    <dl class="detail-list">
+      <dt>Name</dt>    <dd><%= registration.firstName %> <%= registration.lastName %></dd>
+      <dt>Email</dt>   <dd><%= registration.email %></dd>
+      <dt>City</dt>    <dd><%= registration.city %>, <%= registration.country %></dd>
+      <dt>Newsletter</dt>
+      <dd id="newsletter-status"><%= registration.newsletter ? 'Subscribed' : 'Not subscribed' %></dd>
+      <dt>Notifications</dt>
+      <dd id="notifications-status"><%= registration.notifications ? 'Enabled' : 'Disabled' %></dd>
+    </dl>
+  </div>
+
+  <div class="confirmation-actions">
+    <a id="go-to-login-btn"  href="/login"    class="btn btn-primary">Sign In Now</a>
+    <a id="go-to-home-btn"   href="/"         class="btn btn-secondary">Go to Home</a>
+  </div>
+
+</section>
+
+<%- include('partials/footer') %>

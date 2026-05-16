@@ -1,0 +1,63 @@
+<%- include('partials/header', { title }) %>
+
+<section id="checkout-page" class="checkout-page">
+
+  <div class="steps-indicator" aria-label="Checkout progress">
+    <div id="step-shipping" class="step step-done">1. Shipping ✓</div>
+    <div id="step-payment"  class="step step-active">2. Payment</div>
+    <div id="step-confirm"  class="step">3. Confirmation</div>
+  </div>
+
+  <div class="checkout-layout">
+    <div class="checkout-form-panel">
+      <h1 id="checkout-heading">Payment Details</h1>
+
+      <% if (error) { %>
+      <div id="payment-error" class="alert alert-error" role="alert"><%= error %></div>
+      <% } %>
+
+      <div class="alert alert-info">
+        Test card: <code>4242 4242 4242 4242</code> &bull; Expiry: <code>12/28</code> &bull; CVV: <code>123</code>
+      </div>
+
+      <form id="payment-form" action="/checkout/payment" method="POST" novalidate>
+
+        <div class="form-group">
+          <label for="cardName">Name on Card</label>
+          <input id="cardName" type="text" name="cardName" autocomplete="cc-name"
+                 placeholder="Jane Smith" required aria-required="true">
+        </div>
+
+        <div class="form-group">
+          <label for="cardNumber">Card Number</label>
+          <input id="cardNumber" type="text" name="cardNumber" autocomplete="cc-number"
+                 placeholder="4242 4242 4242 4242" maxlength="19" required aria-required="true">
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="cardExpiry">Expiry Date</label>
+            <input id="cardExpiry" type="text" name="cardExpiry" autocomplete="cc-exp"
+                   placeholder="MM/YY" maxlength="5" required aria-required="true">
+          </div>
+          <div class="form-group">
+            <label for="cardCvv">CVV</label>
+            <input id="cardCvv" type="text" name="cardCvv" autocomplete="cc-csc"
+                   placeholder="123" maxlength="4" required aria-required="true">
+          </div>
+        </div>
+
+        <button id="payment-submit" type="submit" class="btn btn-primary btn-full btn-large">
+          Place Order &rarr;
+        </button>
+
+        <a id="back-to-shipping" href="/checkout" class="btn btn-ghost btn-full">
+          &larr; Back to Shipping
+        </a>
+      </form>
+    </div>
+  </div>
+
+</section>
+
+<%- include('partials/footer') %>

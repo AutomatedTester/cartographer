@@ -1,0 +1,54 @@
+<%- include('partials/header', { title }) %>
+
+<section id="search-results-page">
+
+  <div class="page-header">
+    <h1 id="search-heading">
+      Search results for <em id="search-query">"<%= query %>"</em>
+    </h1>
+    <p id="search-count" class="text-muted">
+      <strong><%= results.length %></strong> result<%= results.length !== 1 ? 's' : '' %> found
+    </p>
+  </div>
+
+  <% if (results.length === 0) { %>
+    <div id="no-results" class="empty-state">
+      <p>No products match <strong>"<%= query %>"</strong>.</p>
+      <a id="browse-all-btn" href="/products" class="btn btn-secondary">Browse All Products</a>
+    </div>
+  <% } else { %>
+    <div id="search-results" class="product-grid">
+      <% results.forEach((product, index) => { %>
+      <article id="search-result-<%= product.id %>" class="product-card search-result-item"
+               data-product-id="<%= product.id %>" data-result-index="<%= index %>">
+        <div class="product-image" aria-hidden="true"><%= product.image %></div>
+        <div class="product-info">
+          <h2 id="result-name-<%= product.id %>" class="product-name"><%= product.name %></h2>
+          <p class="product-category"><%= product.category %></p>
+          <p id="result-price-<%= product.id %>" class="product-price">
+            $<%= product.price.toFixed(2) %>
+          </p>
+          <% if (!product.inStock) { %>
+            <span class="badge badge-oos">Out of Stock</span>
+          <% } %>
+        </div>
+        <div class="product-actions">
+          <a id="view-result-<%= product.id %>" href="/products/<%= product.id %>"
+             class="btn btn-secondary">View Details</a>
+          <% if (product.inStock) { %>
+          <form action="/cart/add" method="POST" style="display:inline">
+            <input type="hidden" name="productId" value="<%= product.id %>">
+            <input type="hidden" name="quantity"  value="1">
+            <button id="add-result-<%= product.id %>" type="submit" class="btn btn-primary"
+                    aria-label="Add <%= product.name %> to cart">Add to Cart</button>
+          </form>
+          <% } %>
+        </div>
+      </article>
+      <% }) %>
+    </div>
+  <% } %>
+
+</section>
+
+<%- include('partials/footer') %>

@@ -1,0 +1,49 @@
+<%- include('partials/header', { title }) %>
+
+<section id="register-page" class="auth-wrapper">
+  <div class="auth-card">
+
+    <div class="steps-indicator" aria-label="Registration progress">
+      <div id="reg-step-1" class="step step-done">1. Personal Info ✓</div>
+      <div id="reg-step-2" class="step step-done">2. Address ✓</div>
+      <div id="reg-step-3" class="step step-active">3. Preferences</div>
+    </div>
+
+    <h1 id="register-heading">Set Your Preferences</h1>
+
+    <% if (error) { %>
+    <div id="register-error" class="alert alert-error" role="alert"><%= error %></div>
+    <% } %>
+
+    <form id="register-form-step3" action="/register/step3" method="POST" novalidate>
+
+      <div class="form-group">
+        <label for="password">Choose a Password</label>
+        <input id="password" type="password" name="password" autocomplete="new-password"
+               placeholder="At least 8 characters" minlength="8" required aria-required="true">
+      </div>
+
+      <div class="form-group form-group-checkbox">
+        <label class="checkbox-label">
+          <input id="newsletter" type="checkbox" name="newsletter" value="1">
+          <span>Subscribe to our newsletter for deals and updates</span>
+        </label>
+      </div>
+
+      <div class="form-group form-group-checkbox">
+        <label class="checkbox-label">
+          <input id="notifications" type="checkbox" name="notifications" value="1" checked>
+          <span>Receive order status notifications by email</span>
+        </label>
+      </div>
+
+      <button id="step3-submit" type="submit" class="btn btn-primary btn-full">
+        Create Account
+      </button>
+      <a id="back-to-step2" href="/register/step2" class="btn btn-ghost btn-full">&larr; Back</a>
+    </form>
+
+  </div>
+</section>
+
+<%- include('partials/footer') %>

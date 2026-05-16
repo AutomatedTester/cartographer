@@ -1,0 +1,34 @@
+<%- include('partials/header', { title }) %>
+
+<section id="deals-page">
+
+  <div class="page-header">
+    <h1 id="deals-heading">Current Deals</h1>
+    <p class="page-subtitle">Use these codes at checkout to save on your order.</p>
+  </div>
+
+  <div id="deals-list" class="deals-grid">
+    <% deals.forEach(deal => { %>
+    <article id="deal-<%= deal.id %>" class="deal-card" data-deal-id="<%= deal.id %>">
+      <div class="deal-badge" aria-hidden="true">🏷️</div>
+      <h2 id="deal-title-<%= deal.id %>" class="deal-title"><%= deal.title %></h2>
+      <p  id="deal-saving-<%= deal.id %>" class="deal-saving"><%= deal.saving %></p>
+      <div class="deal-code-block">
+        <span class="deal-code-label">Promo Code:</span>
+        <code id="deal-code-<%= deal.id %>" class="deal-code"><%= deal.code %></code>
+        <button id="copy-code-<%= deal.id %>" type="button" class="btn btn-sm btn-secondary"
+                data-code="<%= deal.code %>" onclick="
+                  navigator.clipboard.writeText(this.dataset.code);
+                  this.textContent = 'Copied!';
+                  setTimeout(() => this.textContent = 'Copy', 2000);
+                ">Copy</button>
+      </div>
+      <p class="deal-expires">Expires: <strong id="deal-expires-<%= deal.id %>"><%= deal.expires %></strong></p>
+      <a id="shop-deal-<%= deal.id %>" href="/products" class="btn btn-primary">Shop Now</a>
+    </article>
+    <% }) %>
+  </div>
+
+</section>
+
+<%- include('partials/footer') %>

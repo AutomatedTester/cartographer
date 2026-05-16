@@ -1,0 +1,15 @@
+<%- include('partials/header', { title }) %>
+
+<section id="not-found-page" class="error-page">
+  <div class="error-icon" aria-hidden="true">🔍</div>
+  <h1 id="not-found-heading">Page Not Found</h1>
+  <p id="not-found-message" class="error-message">
+    The page you're looking for doesn't exist or has been moved.
+  </p>
+  <div class="error-actions">
+    <a id="go-home-btn"     href="/"         class="btn btn-primary">Go to Home</a>
+    <a id="go-products-btn" href="/products" class="btn btn-secondary">Browse Products</a>
+  </div>
+</section>
+
+<%- include('partials/footer') %>

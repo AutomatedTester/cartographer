@@ -1,0 +1,52 @@
+<%- include('partials/header', { title }) %>
+
+<section id="about-page">
+
+  <div class="page-header">
+    <h1 id="about-heading">About BenchmarkShop</h1>
+  </div>
+
+  <div class="about-content">
+
+    <article id="about-mission" class="card">
+      <h2>Our Mission</h2>
+      <p>BenchmarkShop is a neutral, open-source reference application built specifically for
+         comparing web test automation tools. Every page, form, and user journey is documented
+         with stable locators and ground-truth journey specifications.</p>
+    </article>
+
+    <article id="about-journeys" class="card">
+      <h2>Documented User Journeys</h2>
+      <ol id="journey-list">
+        <li id="about-j1"><strong>Login Flow</strong> — Sign in and reach the dashboard</li>
+        <li id="about-j2"><strong>Multi-step Registration</strong> — 3-step account creation</li>
+        <li id="about-j3"><strong>Product → Cart → Checkout</strong> — Full purchase flow</li>
+        <li id="about-j4"><strong>Navigation Menu</strong> — Explore site sub-pages</li>
+        <li id="about-j5"><strong>Search → Results → Detail</strong> — Search and product discovery</li>
+      </ol>
+    </article>
+
+    <article id="about-credentials" class="card">
+      <h2>Test Credentials</h2>
+      <table class="data-table">
+        <thead><tr><th>Username</th><th>Password</th><th>Role</th></tr></thead>
+        <tbody>
+          <tr id="cred-admin"><td><code>admin</code></td><td><code>password123</code></td><td>Admin</td></tr>
+          <tr id="cred-demo"> <td><code>demo</code></td> <td><code>demo123</code></td>     <td>Demo User</td></tr>
+        </tbody>
+      </table>
+    </article>
+
+    <article id="about-locators" class="card">
+      <h2>Locator Strategy</h2>
+      <p>All interactive elements use stable <code>id</code> attributes following the pattern
+         <code>action-target[-variant]</code> (e.g. <code>add-to-cart-1</code>,
+         <code>login-submit</code>, <code>nav-products</code>). These IDs are frozen and will
+         not change between app versions, making them reliable benchmark selectors.</p>
+    </article>
+
+  </div>
+
+</section>
+
+<%- include('partials/footer') %>

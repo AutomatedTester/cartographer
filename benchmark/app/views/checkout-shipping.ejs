@@ -1,0 +1,76 @@
+<%- include('partials/header', { title }) %>
+
+<section id="checkout-page" class="checkout-page">
+
+  <div class="steps-indicator" aria-label="Checkout progress">
+    <div id="step-shipping" class="step step-active">1. Shipping</div>
+    <div id="step-payment"  class="step">2. Payment</div>
+    <div id="step-confirm"  class="step">3. Confirmation</div>
+  </div>
+
+  <div class="checkout-layout">
+    <div class="checkout-form-panel">
+      <h1 id="checkout-heading">Shipping Details</h1>
+
+      <% if (error) { %>
+      <div id="checkout-error" class="alert alert-error" role="alert"><%= error %></div>
+      <% } %>
+
+      <form id="shipping-form" action="/checkout" method="POST" novalidate>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="firstName">First Name</label>
+            <input id="firstName" type="text" name="firstName" autocomplete="given-name"
+                   placeholder="Jane" required aria-required="true">
+          </div>
+          <div class="form-group">
+            <label for="lastName">Last Name</label>
+            <input id="lastName" type="text" name="lastName" autocomplete="family-name"
+                   placeholder="Smith" required aria-required="true">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="address">Street Address</label>
+          <input id="address" type="text" name="address" autocomplete="street-address"
+                 placeholder="123 Main Street" required aria-required="true">
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label for="city">City</label>
+            <input id="city" type="text" name="city" autocomplete="address-level2"
+                   placeholder="San Francisco" required aria-required="true">
+          </div>
+          <div class="form-group">
+            <label for="zip">ZIP / Postal Code</label>
+            <input id="zip" type="text" name="zip" autocomplete="postal-code"
+                   placeholder="94105" required aria-required="true">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="country">Country</label>
+          <select id="country" name="country" autocomplete="country" required aria-required="true">
+            <option value="">Select country…</option>
+            <option value="US">United States</option>
+            <option value="GB">United Kingdom</option>
+            <option value="CA">Canada</option>
+            <option value="AU">Australia</option>
+            <option value="IN">India</option>
+            <option value="DE">Germany</option>
+            <option value="FR">France</option>
+          </select>
+        </div>
+
+        <button id="shipping-submit" type="submit" class="btn btn-primary btn-full btn-large">
+          Continue to Payment &rarr;
+        </button>
+      </form>
+    </div>
+  </div>
+
+</section>
+
+<%- include('partials/footer') %>

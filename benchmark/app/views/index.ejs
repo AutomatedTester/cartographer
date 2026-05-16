@@ -1,0 +1,54 @@
+<%- include('partials/header', { title }) %>
+
+<section id="hero" class="hero">
+  <h1 id="hero-title">Welcome to BenchmarkShop</h1>
+  <p id="hero-subtitle">Your one-stop shop for technology products. Explore our collection of laptops, monitors, and accessories.</p>
+  <div class="hero-actions">
+    <a id="hero-shop-btn" href="/products" class="btn btn-primary btn-large">Shop Now</a>
+    <a id="hero-deals-btn" href="/deals"   class="btn btn-secondary btn-large">View Deals</a>
+  </div>
+</section>
+
+<section id="featured-products" class="section">
+  <h2 class="section-title">Featured Products</h2>
+  <div id="featured-product-list" class="product-grid">
+    <% featuredProducts.forEach(product => { %>
+    <article id="featured-product-<%= product.id %>" class="product-card" data-product-id="<%= product.id %>">
+      <div class="product-image" aria-hidden="true"><%= product.image %></div>
+      <h3 class="product-name"><%= product.name %></h3>
+      <p class="product-price">$<%= product.price.toFixed(2) %></p>
+      <p class="product-category"><%= product.category %></p>
+      <div class="product-actions">
+        <a id="view-product-<%= product.id %>" href="/products/<%= product.id %>" class="btn btn-secondary">View Details</a>
+        <form action="/cart/add" method="POST" style="display:inline">
+          <input type="hidden" name="productId" value="<%= product.id %>">
+          <input type="hidden" name="quantity"  value="1">
+          <button id="quick-add-<%= product.id %>" type="submit" class="btn btn-primary">Add to Cart</button>
+        </form>
+      </div>
+    </article>
+    <% }) %>
+  </div>
+  <div class="section-footer">
+    <a id="view-all-products" href="/products" class="btn btn-secondary">View All Products</a>
+  </div>
+</section>
+
+<section id="current-deals-preview" class="section section-alt">
+  <h2 class="section-title">Current Deals</h2>
+  <div id="deals-preview-list" class="deals-grid">
+    <% deals.forEach(deal => { %>
+    <article id="deal-preview-<%= deal.id %>" class="deal-card">
+      <h3 class="deal-title"><%= deal.title %></h3>
+      <p class="deal-saving"><%= deal.saving %></p>
+      <p class="deal-code">Code: <strong id="deal-code-<%= deal.id %>"><%= deal.code %></strong></p>
+      <p class="deal-expires">Expires: <%= deal.expires %></p>
+    </article>
+    <% }) %>
+  </div>
+  <div class="section-footer">
+    <a id="view-all-deals" href="/deals" class="btn btn-secondary">See All Deals</a>
+  </div>
+</section>
+
+<%- include('partials/footer') %>
