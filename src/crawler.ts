@@ -33,7 +33,10 @@ export class SiteCrawler {
       "--no-sandbox",
       "--disable-dev-shm-usage",
       "--log-level=3",
-      // Allow injected scripts to bypass Content-Security-Policy headers
+      // Allows the injected analyzer bundle to bypass CSP headers set by the
+      // target page. Risk: cross-origin protections are disabled for this
+      // session. A safer alternative is to deliver the bundle as a Chrome
+      // extension or via BiDi addInitScript, which is CSP-exempt by design.
       "--disable-web-security"
     );
 

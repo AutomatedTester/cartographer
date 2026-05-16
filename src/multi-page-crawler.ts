@@ -20,6 +20,8 @@ export class MultiPageCrawler {
     private sessionManager: SessionManager;
     private config: MultiPageCrawlConfig;
     private crawlErrors: CrawlError[] = [];
+    /** Pending button-click targets keyed by page URL, kept off the CrawledPage data type. */
+    private pendingButtonClicks = new Map<string, string[]>();
 
     constructor(config: MultiPageCrawlConfig) {
         // Normalize URL by adding https:// if no protocol provided
@@ -77,11 +79,10 @@ export class MultiPageCrawler {
             ];
             console.error(`[multi-page-crawler] Starting with URL: ${this.config.startUrl}`);
 
-            // Concurrency configuration
+            // Stored for the performance summary; actual crawling is serialised
+            // because a single WebDriver session can only load one page at a time.
             const concurrencyLimit = this.config.concurrencyLimit ?? 3;
             const enableMemoryOptimization = this.config.enableMemoryOptimization ?? true;
-
-            // Process queue with parallel concurrency control
             while (queue.length > 0) {
                 console.error(`[multi-page-crawler] Queue length: ${queue.length}`);
                 // Check page limit
@@ -90,38 +91,25 @@ export class MultiPageCrawler {
                     break;
                 }
 
-                // Take up to concurrencyLimit items from queue
-                const batchSize = Math.min(concurrencyLimit, queue.length);
-                const batch = queue.splice(0, batchSize);
-                console.error(`[multi-page-crawler] Processing batch of ${batch.length} URLs`);
+                // Dequeue one item at a time — a single WebDriver session can
+                // only be on one page at a time, so concurrent driver.get() calls
+                // on the shared baseCrawler would clobber each other.
+                // concurrencyLimit is respected for future pool-based expansion.
+                const { url, depth } = queue.shift()!;
+                console.error(`[multi-page-crawler] Crawling ${url} at depth ${depth}`);
 
-                // Process batch in parallel
-                const crawlPromises = batch.map(({ url, depth }) => {
-                    console.error(`[multi-page-crawler] Starting crawl of ${url} at depth ${depth}`);
-                    return this.crawlSinglePage(url, depth).catch((error) => {
-                        console.error(`[multi-page-crawler] Error crawling ${url}:`, error);
-                        return null;
-                    });
+                const result = await this.crawlSinglePage(url, depth).catch((error) => {
+                    console.error(`[multi-page-crawler] Error crawling ${url}:`, error);
+                    return null;
                 });
 
-                const results = await Promise.all(crawlPromises);
-                console.error(`[multi-page-crawler] Batch complete, got ${results.filter(r => r !== null).length} results`);
+                if (result) {
+                    const { url: crawledUrl, nextUrls } = result;
+                    this.sessionManager.recordNavigation(crawledUrl, nextUrls);
 
-                // Process results and queue new URLs
-                for (let i = 0; i < results.length; i++) {
-                    const result = results[i];
-                    if (!result) continue;
-
-                    const { url, nextUrls } = result;
-                    this.sessionManager.recordNavigation(url, nextUrls);
-
-                    // Queue unvisited links
                     for (const nextUrl of nextUrls) {
-                        if (!this.sessionManager.isVisited(nextUrl)) {
-                            const nextDepth = batch[i].depth + 1;
-                            if (nextDepth <= this.config.maxDepth!) {
-                                queue.push({ url: nextUrl, depth: nextDepth });
-                            }
+                        if (!this.sessionManager.isVisited(nextUrl) && depth + 1 <= this.config.maxDepth!) {
+                            queue.push({ url: nextUrl, depth: depth + 1 });
                         }
                     }
                 }
@@ -422,9 +410,8 @@ export class MultiPageCrawler {
         // Convert to array for return
         const result = Array.from(targets);
 
-        // Store button URLs in page for later click handling
         if (buttonUrls.length > 0) {
-            (page as any).pendingButtonClicks = buttonUrls;
+            this.pendingButtonClicks.set(page.url, buttonUrls);
             console.error(`[multi-page-crawler] Found ${buttonUrls.length} buttons to click for navigation`);
         }
 
@@ -438,7 +425,7 @@ export class MultiPageCrawler {
      */
     private async handlePendingButtonClicks(page: CrawledPage, pageUrl: string): Promise<string[]> {
         const discoveredUrls: string[] = [];
-        const pendingClicks = (page as any).pendingButtonClicks as string[] | undefined;
+        const pendingClicks = this.pendingButtonClicks.get(page.url);
 
         if (!pendingClicks || pendingClicks.length === 0) {
             return discoveredUrls;
@@ -551,7 +538,7 @@ export class MultiPageCrawler {
                             const hasPasswordInput = await driver.findElements(By.css('input[type="password"]')).then(els => els.length > 0);
                             const hasUsernameInput = await driver.findElements(By.css('input[type="email"], input[type="text"][autocomplete*="user"], input[name="username"]')).then(els => els.length > 0);
 
-                            if (hasPasswordInput && (hasUsernameInput || true)) {
+                            if (hasPasswordInput && hasUsernameInput) {
                                 console.error(`[multi-page-crawler]   🔐 Login form detected after button click!`);
                                 loginFormDetected = true;
 

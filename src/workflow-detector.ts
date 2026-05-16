@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto';
 import {
     CrawlSession,
     DetectedWorkflow,
@@ -69,7 +70,7 @@ export class WorkflowDetector {
 
             return deduped;
         } catch (error) {
-            // Return empty array on error instead of crashing
+            console.error('[WorkflowDetector] detect() failed:', error instanceof Error ? error.message : error);
             return [];
         }
     }
@@ -123,31 +124,31 @@ export class WorkflowDetector {
         try {
             workflows.push(...this.detectFormSubmissionFlows(session));
         } catch (e) {
-            // Continue on error
+            console.error('[WorkflowDetector] detectFormSubmissionFlows failed:', e instanceof Error ? e.message : e);
         }
 
         try {
             workflows.push(...this.detectAuthFlows(session));
         } catch (e) {
-            // Continue on error
+            console.error('[WorkflowDetector] detectAuthFlows failed:', e instanceof Error ? e.message : e);
         }
 
         try {
             workflows.push(...this.detectNavigationPatterns(session));
         } catch (e) {
-            // Continue on error
+            console.error('[WorkflowDetector] detectNavigationPatterns failed:', e instanceof Error ? e.message : e);
         }
 
         try {
             workflows.push(...this.detectNavMenuJourneys(session));
         } catch (e) {
-            // Continue on error
+            console.error('[WorkflowDetector] detectNavMenuJourneys failed:', e instanceof Error ? e.message : e);
         }
 
         try {
             workflows.push(...this.detectMultiStepForms(session));
         } catch (e) {
-            // Continue on error
+            console.error('[WorkflowDetector] detectMultiStepForms failed:', e instanceof Error ? e.message : e);
         }
 
         return workflows;
@@ -209,7 +210,7 @@ export class WorkflowDetector {
                 nextPage.url.includes('confirm')
             ) {
                 workflows.push({
-                    id: `wf_form_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                    id: `wf_form_${randomUUID()}`,
                     name: 'form_submission_flow',
                     pageSequence: [currentPage.url, nextPage.url],
                     actionSequence: this.buildActionSequence([currentPage, nextPage]),
@@ -277,7 +278,7 @@ export class WorkflowDetector {
                     const isSignup =
                         page.url.includes('/signup') || page.url.includes('/register');
                     workflows.push({
-                        id: `wf_auth_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                        id: `wf_auth_${randomUUID()}`,
                         name: isSignup ? 'signup_flow' : 'login_flow',
                         pageSequence: [page.url, nextPage.url],
                         actionSequence: this.buildActionSequence([page, nextPage]),
@@ -412,7 +413,7 @@ export class WorkflowDetector {
 
             if (isProductFlow || isBrowsingFlow) {
                 workflows.push({
-                    id: `wf_nav_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                    id: `wf_nav_${randomUUID()}`,
                     name: isProductFlow ? 'product_browsing_flow' : 'search_browsing_flow',
                     pageSequence: [pageA.url, pageB.url, pageC.url],
                     actionSequence: this.buildActionSequence([pageA, pageB, pageC]),
@@ -491,7 +492,7 @@ export class WorkflowDetector {
 
             if (journey.length >= 2) {
                 workflows.push({
-                    id: `wf_navmenu_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+                    id: `wf_navmenu_${randomUUID()}`,
                     name: 'navigation_menu_exploration',
                     pageSequence: journey,
                     actionSequence: this.buildActionSequenceFromNavigation(firstPage, navItem, journeyPages),
@@ -595,7 +596,7 @@ export class WorkflowDetector {
                 const formType = this.inferFormType([page1, page2, page3]);
 
                 workflows.push({
-                    id: `wf_form_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+                    id: `wf_form_${randomUUID()}`,
                     name: `${formType}_flow`,
                     pageSequence: [page1.url, page2.url, page3.url],
                     actionSequence: this.buildActionSequence([page1, page2, page3]),

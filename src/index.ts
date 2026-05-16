@@ -59,6 +59,24 @@ let lastAnalysis: AnalysisResult | null = null;
 
 /** Session storage for multi-page crawls - maps sessionId to CrawlSession */
 const sessions = new Map<string, CrawlSession>();
+const sessionTimestamps = new Map<string, number>();
+const SESSION_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+function storeSession(sessionId: string, session: CrawlSession): void {
+  evictExpiredSessions();
+  sessions.set(sessionId, session);
+  sessionTimestamps.set(sessionId, Date.now());
+}
+
+function evictExpiredSessions(): void {
+  const now = Date.now();
+  for (const [id, ts] of sessionTimestamps) {
+    if (now - ts > SESSION_TTL_MS) {
+      sessions.delete(id);
+      sessionTimestamps.delete(id);
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Input schemas (validated with Zod)
@@ -433,9 +451,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       try {
         // Re-crawl to get a fresh browser with injected handlers
         const crawlResult = await testCrawler.crawlAndAnalyze(url);
-        const executor = new TestExecutor(
-          (testCrawler as any).driver // Access the driver (not ideal, but necessary for now)
-        );
+        const driver = testCrawler.getDriver();
+        if (!driver) throw new Error("WebDriver not available after crawl");
+        const executor = new TestExecutor(driver);
 
         // Get semantic tool schemas
         const semanticTools = SemanticToolGenerator.generate(crawlResult.highIntentElements);
@@ -511,9 +529,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       const result = await crawler.crawl();
 
-      // Store the session for later retrieval
+      // Store the session for later retrieval (TTL-bounded)
       const sessionId = result.session.sessionId;
-      sessions.set(sessionId, result.session);
+      storeSession(sessionId, result.session);
 
       let output: string;
       if (format === "json") {
