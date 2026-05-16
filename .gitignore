@@ -3,3 +3,4 @@ build/
 *.js.map
 mempalace.yaml
 entities.json
+.claude/
