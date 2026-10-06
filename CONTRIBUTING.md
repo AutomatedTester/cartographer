@@ -4,6 +4,7 @@ Thank you for your interest in contributing! This guide explains how to report i
 
 ## Table of Contents
 
+- [AI-Assisted Contributions](#ai-assisted-contributions)
 - [Code of Conduct](#code-of-conduct)
 - [Getting Started](#getting-started)
 - [Reporting Issues](#reporting-issues)
@@ -12,6 +13,83 @@ Thank you for your interest in contributing! This guide explains how to report i
 - [Testing Requirements](#testing-requirements)
 - [Code Review Process](#code-review-process)
 - [Questions?](#questions)
+
+---
+
+## AI-Assisted Contributions
+
+**AI assistance is welcome.** Use Claude, Copilot, Cursor, or anything else
+you find useful. We care about the quality of the contribution, not the tools
+that produced it.
+
+One hard rule:
+
+> **Do not credit an AI as an author of a commit.**
+
+Commit authorship records the person accountable for the change. An AI is a
+tool, not a contributor, and it cannot answer questions in review, respond to a
+regression, or stand behind the work six months from now. You can.
+
+### What that means in practice
+
+Do not put an AI's name or address in:
+
+- the `Author:` or `Committer:` field
+- a `Co-Authored-By:` trailer
+- any other authorship trailer, such as `Signed-off-by:`
+
+```
+# Rejected
+Co-Authored-By: Claude <noreply@anthropic.com>
+Co-Authored-By: Claude Opus 4 <noreply@anthropic.com>
+Co-Authored-By: Copilot <copilot@github.com>
+
+# Fine
+Co-Authored-By: Sam Patel <sam@example.com>
+```
+
+Several coding agents add a `Co-Authored-By:` trailer by default. Turn it off,
+or strip it before you push:
+
+| Tool | How |
+|---|---|
+| Claude Code | `includeCoAuthoredBy: false` in `.claude/settings.json` |
+| GitHub Copilot | Disable commit co-authorship in editor settings |
+| Any tool | `git commit --amend` and delete the trailer before pushing |
+
+To check a branch before opening a PR:
+
+```bash
+git log origin/trunk..HEAD --format='%an <%ae>%n%(trailers)' | \
+  grep -iE 'claude|copilot|chatgpt|gpt-|gemini|cursor|codeium|anthropic|openai' \
+  && echo "AI attribution found - amend before pushing"
+```
+
+### What is fine, and encouraged
+
+- Saying in the **PR description** that you used AI assistance, and how. That
+  is useful context for a reviewer and is not authorship.
+- Mentioning it in a commit **body** as prose, e.g. "Drafted with an AI
+  assistant, reviewed and corrected by hand."
+- Pasting AI-generated analysis into an issue or review comment.
+
+The distinction is simple: describing your process is welcome, assigning
+authorship is not.
+
+### Your responsibility for AI-generated code
+
+By opening a PR you are asserting that you:
+
+- have **read and understood** every line you are submitting
+- have **run the tests** (see [Testing Requirements](#testing-requirements)),
+  not just watched a tool claim they pass
+- can **explain and defend** the change in review
+- believe the contribution does not infringe anyone's licence or copyright
+
+AI-generated code gets exactly the same review as anything else. Review time is
+the scarce resource here, so a large unreviewed dump is more likely to be closed
+than merged. If you would not be comfortable being asked "why does this line
+exist?", it is not ready.
 
 ---
 
@@ -230,6 +308,7 @@ Before submitting, ensure:
 - [ ] New features have tests
 - [ ] Documentation is updated
 - [ ] Commit messages are clear
+- [ ] No AI is credited as a commit author ([why](#ai-assisted-contributions))
 - [ ] PR description explains the change
 
 ### Submitting the PR
@@ -480,6 +559,11 @@ test: add tests for duplicate element detection
 
 perf: optimize DOM traversal for large pages
 ```
+
+**Authorship:** every trailer must name a person. Do not credit an AI as an
+author — see [AI-Assisted Contributions](#ai-assisted-contributions). Many
+coding agents add a `Co-Authored-By:` trailer automatically, so check before
+you push.
 
 ---
 
