@@ -17,7 +17,17 @@ export class TestCaseGenerator {
         elements: HighIntentElement[],
         pageTitle: string
     ): GeneratedTestCase[] {
-        return elements.map((el, idx) => this.generateFromElement(el, pageTitle, idx));
+        // Resolve tool names through the same collision-aware path the handler
+        // generator uses, so a critical test case never references a tool name
+        // that was suffixed away during registration.
+        const critical = SemanticToolGenerator.selectCritical(elements);
+        const uniqueNames = SemanticToolGenerator.generateUniqueToolNames(critical);
+        const toolNameByElement = new Map<HighIntentElement, string>();
+        critical.forEach((el, i) => toolNameByElement.set(el, uniqueNames[i]));
+
+        return elements.map((el, idx) =>
+            this.generateFromElement(el, pageTitle, idx, toolNameByElement.get(el))
+        );
     }
 
     /**
@@ -67,7 +77,8 @@ export class TestCaseGenerator {
     private static generateFromElement(
         el: HighIntentElement,
         pageTitle: string,
-        index: number
+        index: number,
+        semanticToolName?: string
     ): GeneratedTestCase {
         const actionType = this.getActionType(el);
         const priority = this.getPriority(el.intentScore);
@@ -117,7 +128,8 @@ export class TestCaseGenerator {
         let testCode: string | undefined;
         
         if (priority === "critical") {
-            semanticTool = SemanticToolGenerator.generateToolName(el);
+            semanticTool =
+                semanticToolName ?? SemanticToolGenerator.generateToolName(el);
             testCode = this.generateTestCode(semanticTool);
         }
 
@@ -355,9 +367,12 @@ export class TestCaseGenerator {
      * Generate executable test code that calls a semantic webmcp tool
      */
     private static generateTestCode(toolName: string): string {
+        // Bracket notation with a JSON-escaped key: tool names derive from page
+        // content, so dot access could emit invalid syntax for a name that is
+        // not a bare identifier.
         return `
 async function test() {
-  const result = await navigator.webmcp.tools.${toolName}();
+  const result = await navigator.webmcp.tools[${JSON.stringify(toolName)}]();
   if (!result.success) throw new Error(result.message);
   return { success: true, message: "Test passed", duration: result.duration };
 }

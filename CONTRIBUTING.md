@@ -67,8 +67,8 @@ Please contact maintainers privately if you witness unacceptable behavior.
 4. **Verify setup:**
 
    ```bash
+   npm run benchmark:install   # one-off, for the integration fixture
    npm test
-   npm run test:mcp
    ```
 
 For detailed setup and development instructions, see [DEVELOPMENT.md](DEVELOPMENT.md).
@@ -200,7 +200,6 @@ npm run build
 
 # Run all tests
 npm test
-npm run test:mcp
 ```
 
 ### Preparing Your PR
@@ -225,7 +224,7 @@ npm run test:mcp
 Before submitting, ensure:
 
 - [ ] Code follows project style (check [DEVELOPMENT.md](DEVELOPMENT.md#code-style--conventions))
-- [ ] All tests pass (`npm test && npm run test:mcp`)
+- [ ] All tests pass (`npm test`)
 - [ ] No console errors or warnings
 - [ ] TypeScript compiles without errors (`npm run build`)
 - [ ] New features have tests
@@ -344,14 +343,17 @@ describe('Full crawl pipeline', () => {
 ### Running Tests
 
 ```bash
-# Run all tests
+# Run all tests (unit + integration)
 npm test
 
-# Run MCP tests
-npm run test:mcp
+# Just the fast unit suites
+npm run test:unit
 
-# Run specific test file
-npm test -- test/test-analyzer.js
+# Just the integration suites (boots the benchmark fixture app)
+npm run test:integration
+
+# Run a single suite
+node --test test/unit/semantic-tools.test.js
 
 # Watch mode for development
 npm test -- --watch

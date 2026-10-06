@@ -14,12 +14,13 @@ export class SemanticHandlerGenerator {
    * @returns JavaScript code as a string that registers all handlers
    */
   static generateHandlerCode(elements: HighIntentElement[]): string {
-    const criticalElements = elements.filter((el) => el.intentScore >= 50);
+    const criticalElements = SemanticToolGenerator.selectCritical(elements);
+    const toolNames = SemanticToolGenerator.generateUniqueToolNames(criticalElements);
     const toolSchemas = SemanticToolGenerator.generate(elements);
 
     // Generate individual handler functions
     const handlerFunctions = criticalElements
-      .map((el) => this.generateHandlerFunction(el))
+      .map((el, i) => this.generateHandlerFunction(el, toolNames[i]))
       .join("\n\n");
 
     // Generate the tool registration code
@@ -38,7 +39,7 @@ ${handlerFunctions}
 // Export tool names for verification
 navigator.webmcp.registeredTools = [
   ${toolSchemas
-    .map((schema) => `"${schema.name}"`)
+    .map((schema) => this.jsLiteral(schema.name))
     .join(",\n  ")}
 ];
 
@@ -49,10 +50,35 @@ console.log('[webmcp] Registered tools:', navigator.webmcp.registeredTools);
   }
 
   /**
+   * Render a value as a JavaScript string literal, correctly escaped.
+   *
+   * Locators are derived from crawled page content (ids, aria-labels,
+   * data-testid values), so they can contain quotes or backslashes. Splicing
+   * them raw into a quoted literal produces a syntax error that breaks the
+   * whole injected script, not just the one handler, and lets page content
+   * inject arbitrary code into the registration blob.
+   */
+  private static jsLiteral(value: string): string {
+    return JSON.stringify(value);
+  }
+
+  /**
+   * Shared preamble: resolve the element or fail with a useful message.
+   */
+  private static lookupPreamble(element: HighIntentElement): string {
+    const locator = this.jsLiteral(element.locator);
+    return `
+    const el = document.querySelector(${locator});
+    if (!el) throw new Error('Element not found: ' + ${locator});`;
+  }
+
+  /**
    * Generate an individual handler function for a semantic tool
    */
-  private static generateHandlerFunction(element: HighIntentElement): string {
-    const toolName = SemanticToolGenerator.generateToolName(element);
+  private static generateHandlerFunction(
+    element: HighIntentElement,
+    toolName: string = SemanticToolGenerator.generateToolName(element)
+  ): string {
     const actionType = this.inferActionType(element);
 
     // Generate the handler body based on action type
@@ -80,7 +106,7 @@ console.log('[webmcp] Registered tools:', navigator.webmcp.registeredTools);
     }
 
     return `
-navigator.webmcp.tools.${toolName} = async function(params = {}) {
+navigator.webmcp.tools[${this.jsLiteral(toolName)}] = async function(params = {}) {
   const startTime = performance.now();
   try {
     ${handlerBody}
@@ -103,9 +129,7 @@ navigator.webmcp.tools.${toolName} = async function(params = {}) {
    * Generate handler code for click actions
    */
   private static generateClickHandler(element: HighIntentElement): string {
-    return `
-    const el = document.querySelector('${element.locator}');
-    if (!el) throw new Error('Element not found: ${element.locator}');
+    return `${this.lookupPreamble(element)}
     if (!(el instanceof Element)) throw new Error('Not a valid DOM element');
     el.click();
     await new Promise(resolve => setTimeout(resolve, 100));`;
@@ -115,9 +139,7 @@ navigator.webmcp.tools.${toolName} = async function(params = {}) {
    * Generate handler code for input actions
    */
   private static generateInputHandler(element: HighIntentElement): string {
-    return `
-    const el = document.querySelector('${element.locator}');
-    if (!el) throw new Error('Element not found: ${element.locator}');
+    return `${this.lookupPreamble(element)}
     if (!(el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement)) {
       throw new Error('Element is not an input or textarea');
     }
@@ -134,19 +156,21 @@ navigator.webmcp.tools.${toolName} = async function(params = {}) {
    * Generate handler code for navigate actions
    */
   private static generateNavigateHandler(element: HighIntentElement): string {
-    const timeout = "params.timeout || 5000";
-    return `
-    const el = document.querySelector('${element.locator}');
-    if (!el) throw new Error('Element not found: ${element.locator}');
+    // Parenthesised: without it the `||` would bind looser than `<` and make
+    // the loop condition `(... < params.timeout) || 5000`, which is always
+    // truthy and spins forever when navigation does not occur.
+    const timeout = "(params.timeout || 5000)";
+    return `${this.lookupPreamble(element)}
     const initialUrl = window.location.href;
     el.click();
-    
-    // Wait for navigation or timeout
-    const startTime = Date.now();
-    while (window.location.href === initialUrl && Date.now() - startTime < ${timeout}) {
+
+    // Wait for navigation or timeout. Named distinctly from the wrapper's
+    // startTime so the reported duration stays on the performance.now() clock.
+    const navStartTime = Date.now();
+    while (window.location.href === initialUrl && Date.now() - navStartTime < ${timeout}) {
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    
+
     if (window.location.href === initialUrl) {
       throw new Error('Navigation did not occur within timeout');
     }`;
@@ -156,10 +180,8 @@ navigator.webmcp.tools.${toolName} = async function(params = {}) {
    * Generate handler code for submit actions
    */
   private static generateSubmitHandler(element: HighIntentElement): string {
-    return `
-    const el = document.querySelector('${element.locator}');
-    if (!el) throw new Error('Element not found: ${element.locator}');
-    
+    return `${this.lookupPreamble(element)}
+
     // Find the closest form if element is inside one
     let form = el.closest('form');
     if (!form && el instanceof HTMLFormElement) {
@@ -180,9 +202,7 @@ navigator.webmcp.tools.${toolName} = async function(params = {}) {
    * Generate handler code for select actions
    */
   private static generateSelectHandler(element: HighIntentElement): string {
-    return `
-    const el = document.querySelector('${element.locator}');
-    if (!el) throw new Error('Element not found: ${element.locator}');
+    return `${this.lookupPreamble(element)}
     if (!(el instanceof HTMLSelectElement)) {
       throw new Error('Element is not a select element');
     }
@@ -205,10 +225,8 @@ navigator.webmcp.tools.${toolName} = async function(params = {}) {
    * Generate handler code for delete actions
    */
   private static generateDeleteHandler(element: HighIntentElement): string {
-    return `
-    const el = document.querySelector('${element.locator}');
-    if (!el) throw new Error('Element not found: ${element.locator}');
-    
+    return `${this.lookupPreamble(element)}
+
     // Check if element is disabled or hidden
     const style = window.getComputedStyle(el);
     if (style.display === 'none' || style.visibility === 'hidden') {

@@ -67,9 +67,41 @@ jobs:
     - name: Build project
       run: npm run build && npm run build:browser
 
-    - name: Run semantic tools tests
-      run: npm run test:semantic
+    - name: Run unit tests
+      run: npm run test:unit
 
-    - name: Run MCP client tests
-      run: npm run test:mcp
-      continue-on-error: true
+  integration-test:
+    runs-on: ubuntu-latest
+    needs: lint-and-type-check
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Use Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: 22.x
+        cache: 'npm'
+
+    - name: Install dependencies
+      run: npm ci
+
+    - name: Install benchmark fixture dependencies
+      run: npm run benchmark:install
+
+    - name: Build project
+      run: npm run build && npm run build:browser
+
+    - name: Set up Chrome
+      uses: browser-actions/setup-chrome@v1
+      with:
+        chrome-version: stable
+        install-chromedriver: true
+
+    # REQUIRE_BROWSER=1 makes a browser that will not start a hard failure.
+    # Without it a broken driver silently skips the crawl suite and the job
+    # still reports green, which is how the previous suite hid breakage.
+    - name: Run integration tests
+      run: npm run test:integration
+      env:
+        REQUIRE_BROWSER: '1'

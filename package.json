@@ -10,10 +10,11 @@
     "start": "npm run build && npm run build:browser && node build/index.js",
     "dev": "tsx src/index.ts",
     "prepublishOnly": "npm run build && npm run build:browser",
-    "test": "npm run test:semantic",
-    "test:semantic": "node test/test-semantic-tools.js",
-    "test:bidi": "node test/test-bidi-session.js",
-    "test:mcp": "timeout 30 node test/test-mcp-client.js || true"
+    "pretest": "npm run build && npm run build:browser",
+    "test": "npm run test:unit && npm run test:integration",
+    "test:unit": "node --test test/unit/*.test.js",
+    "test:integration": "node --test test/integration/*.test.js",
+    "benchmark:install": "npm --prefix benchmark/app install --no-audit --no-fund"
   },
   "dependencies": {
     "@huggingface/transformers": "^3.0.0",
