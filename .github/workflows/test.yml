@@ -67,8 +67,12 @@ jobs:
     - name: Build project
       run: npm run build && npm run build:browser
 
-    - name: Run unit tests
-      run: npm run test:unit
+    # test:coverage is test:unit plus a coverage floor. The floor is a ratchet:
+    # it is set to the coverage the suite actually achieves, so a PR that adds
+    # code without tests fails here rather than quietly diluting the number.
+    # Raise it when coverage rises; never lower it to make a build pass.
+    - name: Run unit tests with coverage floor
+      run: npm run test:coverage
 
   integration-test:
     runs-on: ubuntu-latest

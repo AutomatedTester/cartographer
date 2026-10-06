@@ -197,3 +197,335 @@ describe("WorkflowDetector scaling", () => {
     );
   });
 });
+
+// ===========================================================================
+// Per-rule branch coverage
+//
+// The suite above reached 96% of lines but only 59% of branches: it walked
+// every function while leaving most individual decisions untaken. These are
+// the decisions — one case per branch, each with the opposing case — for the
+// classifiers that turn an element into a navigation type, a field type, a
+// validation list and a page estimate.
+// ===========================================================================
+
+function el(overrides = {}) {
+  return {
+    path: "body > input",
+    tag: "input",
+    locator: "#f",
+    intentScore: 70,
+    intentReasons: [],
+    ...overrides,
+  };
+}
+
+describe("WorkflowDetector: navigation classification", () => {
+  function chainFor(overrides) {
+    return detector.detectNavigationChains([el({ navigates: true, ...overrides })])[0];
+  }
+
+  it("calls an absolute http target external", () => {
+    assert.equal(chainFor({ navigationTarget: "https://other.test/x" }).type, "external");
+  });
+
+  it("calls a relative target internal", () => {
+    assert.equal(chainFor({ navigationTarget: "/cart" }).type, "internal");
+  });
+
+  it("calls a navigating element with no target a modal", () => {
+    assert.equal(chainFor({}).type, "modal");
+    assert.equal(chainFor({ navigationTarget: "" }).type, "modal");
+  });
+
+  it("carries the target through onto the chain", () => {
+    assert.equal(chainFor({ navigationTarget: "/cart" }).target, "/cart");
+  });
+
+  it("ignores elements that do not navigate", () => {
+    assert.deepEqual(detector.detectNavigationChains([el({ navigates: false })]), []);
+  });
+});
+
+describe("WorkflowDetector: navigation confidence", () => {
+  function confidenceFor(overrides) {
+    return detector.detectNavigationChains([el({ navigates: true, ...overrides })])[0]
+      .confidence;
+  }
+
+  it("starts at 0.5 for a bare navigating element", () => {
+    assert.equal(confidenceFor({}), 0.5);
+  });
+
+  it("adds 0.2 for an explicit target", () => {
+    assert.equal(confidenceFor({ navigationTarget: "/next" }), 0.7);
+  });
+
+  it("adds 0.1 for an aria-label saying next", () => {
+    assert.equal(confidenceFor({ ariaLabel: "Next page" }), 0.6);
+  });
+
+  it("adds 0.1 for text saying continue", () => {
+    assert.equal(confidenceFor({ text: "Continue" }), 0.6);
+  });
+
+  it("adds 0.05 for a next or continue class", () => {
+    assert.equal(confidenceFor({ classes: ["btn-next"] }), 0.55);
+    assert.equal(confidenceFor({ classes: ["continue-link"] }), 0.55);
+  });
+
+  it("accumulates every signal", () => {
+    const confidence = confidenceFor({
+      navigationTarget: "/next",
+      ariaLabel: "Next page",
+      text: "Continue",
+      classes: ["btn-next"],
+    });
+    assert.ok(Math.abs(confidence - 0.95) < 1e-9, `got ${confidence}`);
+  });
+
+  it("caps confidence at 0.95", () => {
+    const confidence = confidenceFor({
+      navigationTarget: "https://x.test/next",
+      ariaLabel: "next next",
+      text: "continue continue",
+      classes: ["next", "continue"],
+    });
+    assert.ok(confidence <= 0.95, `got ${confidence}`);
+  });
+
+  it("is case insensitive about the wording", () => {
+    assert.equal(confidenceFor({ ariaLabel: "NEXT" }), 0.6);
+    assert.equal(confidenceFor({ text: "CONTINUE" }), 0.6);
+  });
+
+  it("does not credit unrelated wording", () => {
+    assert.equal(confidenceFor({ ariaLabel: "Back", text: "Back", classes: ["prev"] }), 0.5);
+  });
+});
+
+describe("WorkflowDetector: form field classification", () => {
+  function fieldTypeFor(overrides) {
+    return detector.analyzeFormStateTransitions([el(overrides)])[0].fieldType;
+  }
+
+  it("classifies by input type first", () => {
+    assert.equal(fieldTypeFor({ attributes: { type: "email" } }), "email");
+    assert.equal(fieldTypeFor({ attributes: { type: "password" } }), "password");
+    assert.equal(fieldTypeFor({ attributes: { type: "checkbox" } }), "checkbox");
+    assert.equal(fieldTypeFor({ attributes: { type: "text" } }), "text");
+  });
+
+  it("falls back to wording when there is no type", () => {
+    assert.equal(fieldTypeFor({ text: "Email address" }), "email");
+    assert.equal(fieldTypeFor({ text: "Password" }), "password");
+    assert.equal(fieldTypeFor({ text: "I agree to the terms" }), "checkbox");
+  });
+
+  it("reads the aria-label when there is no text", () => {
+    assert.equal(fieldTypeFor({ ariaLabel: "Email" }), "email");
+  });
+
+  it("is case insensitive about the type attribute", () => {
+    assert.equal(fieldTypeFor({ attributes: { type: "EMAIL" } }), "email");
+  });
+
+  it("treats an untyped input as text", () => {
+    assert.equal(fieldTypeFor({ tag: "input" }), "text");
+  });
+
+  it("ranks email above password when both words appear", () => {
+    assert.equal(fieldTypeFor({ text: "email and password" }), "email");
+  });
+
+  // analyzeFormStateTransitions only looks at input and form tags, so a
+  // <select> never reaches the classifier through the public method — the
+  // 'select' branch is unreachable in practice.
+  it("only considers input and form elements", () => {
+    assert.deepEqual(detector.analyzeFormStateTransitions([el({ tag: "select" })]), []);
+    assert.deepEqual(detector.analyzeFormStateTransitions([el({ tag: "button" })]), []);
+  });
+
+  it("classifies a form element as other when nothing else matches", () => {
+    assert.equal(fieldTypeFor({ tag: "form", text: "Contact us" }), "other");
+  });
+});
+
+describe("WorkflowDetector: validation detection", () => {
+  function validationFor(overrides) {
+    return detector.analyzeFormStateTransitions([el(overrides)])[0].validation;
+  }
+
+  it("reports no validation for a bare field", () => {
+    assert.deepEqual(validationFor({}), []);
+  });
+
+  it("detects each supported attribute", () => {
+    assert.deepEqual(validationFor({ attributes: { required: "" } }), ["required"]);
+    assert.deepEqual(validationFor({ attributes: { pattern: "\\d+" } }), ["pattern"]);
+    assert.deepEqual(validationFor({ attributes: { minlength: "3" } }), ["minlength"]);
+    assert.deepEqual(validationFor({ attributes: { maxlength: "9" } }), ["maxlength"]);
+  });
+
+  it("detects a required aria-label", () => {
+    assert.deepEqual(validationFor({ ariaLabel: "Name (required)" }), ["aria-required"]);
+  });
+
+  it("reports several validations in declaration order", () => {
+    assert.deepEqual(
+      validationFor({
+        ariaLabel: "required",
+        attributes: { required: "", pattern: "x", minlength: "1", maxlength: "2" },
+      }),
+      ["required", "pattern", "minlength", "maxlength", "aria-required"]
+    );
+  });
+
+  it("marks a field required from its aria-label", () => {
+    const [state] = detector.analyzeFormStateTransitions([
+      el({ ariaLabel: "Email (required)" }),
+    ]);
+    assert.equal(state.required, true);
+  });
+
+  it("marks a field not required when the label says nothing", () => {
+    const [state] = detector.analyzeFormStateTransitions([el({ ariaLabel: "Email" })]);
+    assert.equal(state.required, false);
+  });
+
+  it("treats a missing aria-label as not required", () => {
+    assert.equal(detector.analyzeFormStateTransitions([el({})])[0].required, false);
+  });
+});
+
+describe("WorkflowDetector: form state sequencing", () => {
+  it("returns a single state for a single field", () => {
+    const states = detector.analyzeFormStateTransitions([el({ text: "Name" })]);
+    assert.equal(states.length, 1);
+    assert.equal(states[0].sequence, 1);
+  });
+
+  it("opens a new state at a next or continue control", () => {
+    const states = detector.analyzeFormStateTransitions([
+      el({ text: "Name" }),
+      el({ text: "Continue" }),
+      el({ text: "Card number" }),
+    ]);
+
+    assert.equal(states.length, 2, "one state per step");
+    assert.equal(states[0].sequence, 1);
+    assert.equal(states[1].sequence, 2);
+  });
+
+  it("does not open a new state for an ordinary field", () => {
+    const states = detector.analyzeFormStateTransitions([
+      el({ text: "First name" }),
+      el({ text: "Last name" }),
+    ]);
+    assert.equal(states.length, 1);
+  });
+
+  it("returns nothing for a page with no form fields", () => {
+    assert.deepEqual(detector.analyzeFormStateTransitions([]), []);
+    assert.deepEqual(detector.analyzeFormStateTransitions([el({ tag: "a" })]), []);
+  });
+
+  it("recognises both next and continue as step boundaries", () => {
+    for (const word of ["Next", "Continue"]) {
+      const states = detector.analyzeFormStateTransitions([
+        el({ text: "Name" }),
+        el({ text: word }),
+      ]);
+      assert.equal(states.length, 2, `"${word}" should start a step`);
+    }
+  });
+});
+
+describe("WorkflowDetector: pattern matching rules", () => {
+  it("requires every signature term to be present", () => {
+    // LOGIN needs email-or-username, password, and a login verb.
+    const partial = [el({ text: "Email" }), el({ text: "Password" })];
+    assert.ok(!typesFor(partial).includes("LOGIN"), "missing the verb");
+
+    const complete = [...partial, el({ tag: "button", text: "Sign in" })];
+    assert.ok(typesFor(complete).includes("LOGIN"));
+  });
+
+  it("accepts either side of an OR term", () => {
+    const byEmail = [
+      el({ text: "Email" }),
+      el({ text: "Password" }),
+      el({ text: "Login" }),
+    ];
+    const byUsername = [
+      el({ text: "Username" }),
+      el({ text: "Password" }),
+      el({ text: "Login" }),
+    ];
+
+    assert.ok(typesFor(byEmail).includes("LOGIN"));
+    assert.ok(typesFor(byUsername).includes("LOGIN"));
+  });
+
+  it("matches on aria-label as well as text", () => {
+    const elements = [
+      el({ ariaLabel: "Email" }),
+      el({ ariaLabel: "Password" }),
+      el({ tag: "button", ariaLabel: "Sign in" }),
+    ];
+    assert.ok(typesFor(elements).includes("LOGIN"));
+  });
+
+  it("is case insensitive", () => {
+    const elements = [
+      el({ text: "EMAIL" }),
+      el({ text: "PASSWORD" }),
+      el({ text: "LOGIN" }),
+    ];
+    assert.ok(typesFor(elements).includes("LOGIN"));
+  });
+
+  it("reports nothing when the element list is empty", () => {
+    assert.deepEqual(detector.detectWorkflows([]), []);
+  });
+
+  it("sorts results by descending confidence", () => {
+    const confidences = detector
+      .detectWorkflows(multiStepCheckoutPage)
+      .map((w) => w.confidence);
+    assert.deepEqual(confidences, [...confidences].sort((a, b) => b - a));
+  });
+});
+
+describe("WorkflowDetector: page count estimation", () => {
+  function pagesFor(elements) {
+    const [result] = detector.detectWorkflows(elements);
+    return result?.estimatedPages;
+  }
+
+  it("counts one page for a form with no navigation", () => {
+    const elements = [
+      el({ text: "Email" }),
+      el({ text: "Password" }),
+      el({ tag: "span", text: "Login" }),
+    ];
+    assert.equal(pagesFor(elements), 1);
+  });
+
+  it("adds a page for the submit step", () => {
+    const elements = [
+      el({ text: "Email" }),
+      el({ text: "Password" }),
+      el({ tag: "button", text: "Login" }),
+    ];
+    assert.equal(pagesFor(elements), 2);
+  });
+
+  it("adds a page per navigating element", () => {
+    const elements = [
+      el({ text: "Email" }),
+      el({ text: "Password" }),
+      el({ tag: "a", text: "Login", navigates: true, navigationTarget: "/in" }),
+    ];
+    assert.equal(pagesFor(elements), 2, "one nav element, no submit button");
+  });
+});
