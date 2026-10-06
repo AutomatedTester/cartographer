@@ -106,7 +106,7 @@ export class LocatorGenerator {
    * Higher scores = better matches
    */
   private calculateScore(keywords: string[], el: DomElement): number {
-    let score = 0;
+    let keywordScore = 0;
 
     const text = (el.text || '').toLowerCase();
     const aria = (el.ariaLabel || '').toLowerCase();
@@ -118,25 +118,36 @@ export class LocatorGenerator {
     keywords.forEach(kw => {
       // Text content (highest priority)
       if (text.includes(kw)) {
-        score += 40;
+        keywordScore += 40;
       }
       // Label/aria (high priority)
       if (aria.includes(kw)) {
-        score += 35;
+        keywordScore += 35;
       }
       // ID (medium priority)
       if (id.includes(kw)) {
-        score += 30;
+        keywordScore += 30;
       }
       // Classes (medium priority)
       if (classes.includes(kw)) {
-        score += 25;
+        keywordScore += 25;
       }
       // Placeholder (medium priority)
       if (placeholder.includes(kw)) {
-        score += 25;
+        keywordScore += 25;
       }
     });
+
+    // No keyword touched this element, so it is not a candidate. The bonuses
+    // below are tie-breakers between genuine matches; adding them
+    // unconditionally gave every visible element a positive score, which made
+    // the "no elements matched" path unreachable and let an unrelated
+    // description come back with a confident-looking selector.
+    if (keywordScore === 0) {
+      return 0;
+    }
+
+    let score = keywordScore;
 
     // Boost visible elements
     if (el.isVisible) {

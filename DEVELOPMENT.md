@@ -116,8 +116,11 @@ build/                   # Compiled JavaScript output (auto-generated)
 └── analyzer.browser.js # Browser bundle of analyzer
 
 test/                    # Test files
-├── test-mcp-client.js  # MCP server communication test
-└── test-semantic-tools.js # Semantic tools functionality test
+├── unit/               # node:test suites, no browser or network
+├── integration/        # node:test suites against the local benchmark app
+├── helpers/            # shared harnesses (fake DOM, MCP client, app lifecycle)
+├── fixtures/           # page element fixtures
+└── manual/             # exploration scripts, not part of the CI gate
 
 tsconfig.json           # Node.js build configuration (ES2022)
 tsconfig.browser.json   # Browser build configuration (ES2020)
@@ -228,7 +231,7 @@ npm run build
 
 # 4. Run tests
 npm test
-npm run test:mcp
+npm run test:integration
 
 # 5. Commit and push
 git add .
@@ -243,7 +246,7 @@ git push origin feature-branch
 npm start
 
 # Terminal 2: Test with a client
-node test/test-mcp-client.js
+node --test test/integration/mcp-server.test.js
 ```
 
 This tests the `crawl_and_analyze` tool on a test URL.
@@ -689,7 +692,7 @@ npm test
 # Tests browser-side tool behavior
 
 # Test MCP server communication
-npm run test:mcp
+npm run test:integration
 # Verifies server protocol with client
 ```
 
@@ -702,7 +705,7 @@ npm start &  # Start server in background
 sleep 2
 
 # Call crawl_and_analyze tool
-node test/test-mcp-client.js
+node --test test/integration/mcp-server.test.js
 
 # Kill server
 pkill -f "node.*index.js"

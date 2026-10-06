@@ -1,4 +1,5 @@
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
 import { Builder, WebDriver, WebElement, logging } from "selenium-webdriver";
@@ -25,19 +26,46 @@ export interface CrawlAnalyzeOptions {
 export class SiteCrawler {
   private driver: WebDriver | null = null;
   private biDiEnabled: boolean = false;
+  private userDataDir: string | null = null;
 
   /** Build and launch a headless Chrome driver with BiDi enabled. */
   async init(): Promise<void> {
     const options = new chrome.Options();
+
+    // A dedicated throwaway profile per crawler instance, so concurrent crawls
+    // do not contend for the default profile's lock file and no crawl state
+    // persists between runs.
+    this.userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "webmcp-chrome-"));
+
     options.addArguments(
+      // Headless unless explicitly asked for a visible browser. This was
+      // missing despite the class being documented as headless, so any
+      // environment without a display (CI, containers, remote shells) failed
+      // with "Chrome instance exited" at session creation.
+      ...(process.env.WEBMCP_HEADED === "1" ? [] : ["--headless=new"]),
       "--no-sandbox",
       "--disable-dev-shm-usage",
-      "--log-level=3",
-      // Allows the injected analyzer bundle to bypass CSP headers set by the
-      // target page. Risk: cross-origin protections are disabled for this
-      // session. A safer alternative is to deliver the bundle as a Chrome
-      // extension or via BiDi addInitScript, which is CSP-exempt by design.
-      "--disable-web-security"
+      "--disable-gpu",
+      "--window-size=1280,900",
+      `--user-data-dir=${this.userDataDir}`,
+      "--log-level=3"
+      // Deliberately NOT --disable-web-security. It was previously listed here
+      // to let the injected analyzer bundle bypass page CSP, but that premise
+      // is wrong on two counts:
+      //
+      //  1. The bundle is injected with driver.executeScript(), which runs via
+      //     the WebDriver automation protocol rather than a page <script> tag,
+      //     so the page's CSP never applied to it in the first place.
+      //  2. Chrome ignores --disable-web-security unless --user-data-dir is
+      //     also set, which it was not, so the flag had never taken effect in
+      //     any release of this crawler.
+      //
+      // Turning it on would disable the same-origin policy for a browser that
+      // navigates to arbitrary caller-supplied URLs. A hostile page could then
+      // read cross-origin responses — cloud metadata endpoints, localhost
+      // services — and exfiltrate them. If a future change genuinely needs to
+      // relax CSP, scope it with Page.setBypassCSP over CDP or a BiDi preload
+      // script instead; both leave the same-origin policy intact.
     );
 
     // Enable browser-side console log capture
@@ -238,6 +266,16 @@ export class SiteCrawler {
     if (this.driver) {
       await this.driver.quit();
       this.driver = null;
+    }
+    // Remove the throwaway profile. Best effort: a leaked temp directory must
+    // not turn into a failed crawl.
+    if (this.userDataDir) {
+      try {
+        fs.rmSync(this.userDataDir, { recursive: true, force: true });
+      } catch {
+        // ignore
+      }
+      this.userDataDir = null;
     }
   }
 

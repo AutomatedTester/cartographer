@@ -11,16 +11,43 @@ export class SemanticToolGenerator {
    * @returns Array of semantic tool schemas
    */
   static generate(elements: HighIntentElement[]): SemanticToolSchema[] {
-    return elements
-      .filter((el) => el.intentScore >= 50) // Only critical elements
-      .map((el) => this.generateToolSchema(el));
+    const critical = this.selectCritical(elements);
+    const names = this.generateUniqueToolNames(critical);
+    return critical.map((el, i) => this.generateToolSchema(el, names[i]));
+  }
+
+  /**
+   * The elements that become tools. Shared with SemanticHandlerGenerator so
+   * schemas and handlers always describe the same set in the same order.
+   */
+  static selectCritical(elements: HighIntentElement[]): HighIntentElement[] {
+    return elements.filter((el) => el.intentScore >= 50);
+  }
+
+  /**
+   * Derive tool names for a list of elements, disambiguating collisions.
+   *
+   * Two elements can easily reduce to the same name (two "Login" buttons, say).
+   * Without a suffix the second handler silently overwrites the first and the
+   * page ends up with fewer tools than elements.
+   */
+  static generateUniqueToolNames(elements: HighIntentElement[]): string[] {
+    const used = new Map<string, number>();
+    return elements.map((el) => {
+      const base = this.generateToolName(el);
+      const seen = used.get(base) ?? 0;
+      used.set(base, seen + 1);
+      return seen === 0 ? base : `${base}${seen + 1}`;
+    });
   }
 
   /**
    * Generate a single semantic tool schema from an element
    */
-  private static generateToolSchema(element: HighIntentElement): SemanticToolSchema {
-    const toolName = this.generateToolName(element);
+  private static generateToolSchema(
+    element: HighIntentElement,
+    toolName: string = this.generateToolName(element)
+  ): SemanticToolSchema {
     const description = this.generateToolDescription(element);
     const inputSchema = this.generateInputSchema(element);
 
@@ -54,7 +81,7 @@ export class SemanticToolGenerator {
       .join(" ");
 
     // Convert to camelCase
-    return baseName
+    const camel = baseName
       .split(/\s+/)
       .map((word, idx) =>
         idx === 0
@@ -63,6 +90,14 @@ export class SemanticToolGenerator {
       )
       .join("")
       .replace(/[^a-zA-Z0-9]/g, ""); // Remove any special characters
+
+    // Stripping non-alphanumerics can empty the name entirely (an icon-only
+    // button labelled "→", for example). An empty name would emit
+    // `navigator.webmcp.tools. = ...`, a syntax error that breaks every tool
+    // in the injected script, so fall back to something always usable.
+    if (camel.length > 0) return camel;
+    const tagFallback = (element.tag || "").replace(/[^a-zA-Z0-9]/g, "");
+    return tagFallback.length > 0 ? tagFallback.toLowerCase() : "element";
   }
 
   /**

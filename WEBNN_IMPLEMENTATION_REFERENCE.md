@@ -37,7 +37,7 @@ Question: How much time do you have?
 - [ ] Add `setEmbedding()` method
 - [ ] Add `clearExpired()` method
 - [ ] Update `src/analyzer.ts` to use cache
-- [ ] Test: `npm run test:semantic`
+- [ ] Test: `npm run test:unit`
 - [ ] Measure cache hit rate
 
 **Key Code Points:**
@@ -60,7 +60,7 @@ if (!embedding) {
 **Validation:**
 ```bash
 # Check for cache stats in logs
-npm run test:semantic 2>&1 | grep -i "cache stats"
+npm run test:unit 2>&1 | grep -i "cache stats"
 ```
 
 ---
@@ -102,7 +102,7 @@ private async isWebNNSupported(): Promise<boolean> {
 **Testing:**
 ```bash
 # Test on Chrome/Edge with WebNN
-npm run test:semantic
+npm run test:unit
 
 # Test on Safari (no WebNN support)
 # Verify timeout < 1 second
@@ -303,7 +303,7 @@ Performance Tests:
 
 Integration Tests:
 ├─ [ ] npm run test passes
-├─ [ ] npm run test:semantic passes
+├─ [ ] npm run test:unit passes
 ├─ [ ] Manual crawl: npm run start
 ├─ [ ] MCP tool calls work
 └─ [ ] No new errors in console
@@ -313,7 +313,7 @@ Integration Tests:
 ```bash
 npm run build
 npm run test
-npm run test:semantic
+npm run test:unit
 node test/test-bstackdemo.js
 node test/test-internet-crawl.js
 ```
@@ -358,7 +358,7 @@ node test/test-internet-crawl.js
 console.log(typeof navigator.ml); // Should be "object"
 
 # Check in analyzer logs
-npm run test:semantic 2>&1 | grep "WebNN"
+npm run test:unit 2>&1 | grep "WebNN"
 
 # Force WASM fallback
 # In analyzer.ts, temporarily:
@@ -372,7 +372,7 @@ this.webnnAvailable = false; // Force disable
 # Application → IndexedDB → webmcp_embeddings
 
 # Check cache stats
-npm run test:semantic 2>&1 | grep "Cache stats"
+npm run test:unit 2>&1 | grep "Cache stats"
 
 # Should show: { hits: X, misses: Y, hitRate: "Z%" }
 ```
@@ -532,7 +532,7 @@ Measurable Results:
 ✅ Heuristic scorer accuracy > 85%
 ✅ get_element_locator has 0 Copilot calls
 ✅ Overall analysis time < 2 seconds
-✅ All tests pass: npm run test && npm run test:semantic
+✅ All tests pass: npm test
 ```
 
 ### Phase 2 Success

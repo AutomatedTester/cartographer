@@ -13,6 +13,15 @@ export class MarkdownExporter {
         // Header
         sections.push(this.formatHeader(result));
 
+        // Degraded-analysis warning. AnalysisResult.error is set when the page
+        // still produced a payload but something went wrong (model load
+        // timeout, partial extraction). Markdown is the default output of
+        // crawl_and_analyze, so omitting it here meant the caller saw a clean
+        // report with no sign the results were incomplete.
+        if (result.error) {
+            sections.push(this.formatAnalysisWarning(result.error));
+        }
+
         // Executive Summary
         sections.push(this.formatExecutiveSummary(result));
 
@@ -82,6 +91,13 @@ export class MarkdownExporter {
 
 **URL:** ${result.url}
 **Generated:** ${new Date().toISOString()}
+`;
+    }
+
+    private static formatAnalysisWarning(error: string): string {
+        return `> **⚠️ Analysis incomplete.** The results below may be partial.
+>
+> \`${error}\`
 `;
     }
 

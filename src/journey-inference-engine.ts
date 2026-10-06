@@ -211,12 +211,22 @@ export class JourneyInferenceEngine {
                 classification.checkoutPage = page.url;
             }
 
-            // Account/profile
+            // Account/profile. Authentication entry points and the landing page
+            // that follows a successful sign-in count too: /login -> /dashboard
+            // is the most common account journey there is, and matching only on
+            // 'account'/'profile' missed it entirely.
             if (
                 path.includes('account') ||
                 path.includes('profile') ||
                 path.includes('user') ||
-                path.includes('settings')
+                path.includes('settings') ||
+                path.includes('login') ||
+                path.includes('signin') ||
+                path.includes('sign-in') ||
+                path.includes('register') ||
+                path.includes('signup') ||
+                path.includes('sign-up') ||
+                path.includes('dashboard')
             ) {
                 classification.accountPage = page.url;
             }
@@ -547,6 +557,20 @@ export class JourneyInferenceEngine {
             'settings',
             'preferences',
             'dashboard',
+            // Credential entry and auth actions are the clearest account
+            // signal a page can carry, and were previously ignored.
+            'sign in',
+            'signin',
+            'sign up',
+            'signup',
+            'log in',
+            'login',
+            'log out',
+            'logout',
+            'register',
+            'username',
+            'password',
+            'email address',
         ];
         return accountKeywords.some(kw => text.includes(kw));
     }
