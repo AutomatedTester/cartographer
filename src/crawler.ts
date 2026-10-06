@@ -32,11 +32,9 @@ export class SiteCrawler {
   async init(): Promise<void> {
     const options = new chrome.Options();
 
-    // A dedicated profile per crawler instance. Two reasons:
-    //  1. Chrome ignores --disable-web-security unless --user-data-dir is also
-    //     set, so without this the CSP bypass below silently does nothing.
-    //  2. Concurrent crawls would otherwise contend for the default profile's
-    //     lock file.
+    // A dedicated throwaway profile per crawler instance, so concurrent crawls
+    // do not contend for the default profile's lock file and no crawl state
+    // persists between runs.
     this.userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "webmcp-chrome-"));
 
     options.addArguments(
@@ -50,12 +48,24 @@ export class SiteCrawler {
       "--disable-gpu",
       "--window-size=1280,900",
       `--user-data-dir=${this.userDataDir}`,
-      "--log-level=3",
-      // Allows the injected analyzer bundle to bypass CSP headers set by the
-      // target page. Risk: cross-origin protections are disabled for this
-      // session. A safer alternative is to deliver the bundle as a Chrome
-      // extension or via BiDi addInitScript, which is CSP-exempt by design.
-      "--disable-web-security"
+      "--log-level=3"
+      // Deliberately NOT --disable-web-security. It was previously listed here
+      // to let the injected analyzer bundle bypass page CSP, but that premise
+      // is wrong on two counts:
+      //
+      //  1. The bundle is injected with driver.executeScript(), which runs via
+      //     the WebDriver automation protocol rather than a page <script> tag,
+      //     so the page's CSP never applied to it in the first place.
+      //  2. Chrome ignores --disable-web-security unless --user-data-dir is
+      //     also set, which it was not, so the flag had never taken effect in
+      //     any release of this crawler.
+      //
+      // Turning it on would disable the same-origin policy for a browser that
+      // navigates to arbitrary caller-supplied URLs. A hostile page could then
+      // read cross-origin responses — cloud metadata endpoints, localhost
+      // services — and exfiltrate them. If a future change genuinely needs to
+      // relax CSP, scope it with Page.setBypassCSP over CDP or a BiDi preload
+      // script instead; both leave the same-origin policy intact.
     );
 
     // Enable browser-side console log capture
