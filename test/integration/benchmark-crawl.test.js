@@ -64,12 +64,29 @@ describe("BenchmarkShop crawl", { skip: gate.skip }, () => {
     await app?.stop();
   });
 
+  /**
+   * Every assertion below depends on the crawl having produced a result.
+   * Without this guard a failed crawl yields eight identical
+   * "Cannot read properties of null" TypeErrors, burying the one failure that
+   * actually explains them.
+   */
+  function crawl() {
+    if (!crawlResult) {
+      assert.fail(
+        "crawl did not produce a result - see the 'completes without throwing' " +
+          `failure for the cause: ${crawlError?.message ?? "unknown"}`
+      );
+    }
+    return crawlResult;
+  }
+
   it("completes without throwing", () => {
     assert.equal(crawlError, null, `crawl threw: ${crawlError?.stack ?? crawlError}`);
     assert.ok(crawlResult, "crawl returned no result");
   });
 
   it("visits more than just the entry page", () => {
+    const crawlResult = crawl();
     assert.ok(
       crawlResult.summary.pagesVisited >= 3,
       `expected to reach at least 3 pages, visited ${crawlResult.summary.pagesVisited}`
@@ -77,6 +94,7 @@ describe("BenchmarkShop crawl", { skip: gate.skip }, () => {
   });
 
   it("reaches pages that appear in the ground-truth journeys", () => {
+    const crawlResult = crawl();
     const visited = new Set(crawlResult.session.pages.map((p) => pathOf(p.url)));
     const groundTruthPaths = new Set(
       groundTruth.journeys.flatMap((j) => j.pageSequence).filter((p) => !p.includes(":"))
@@ -90,6 +108,7 @@ describe("BenchmarkShop crawl", { skip: gate.skip }, () => {
   });
 
   it("finds high-intent elements on the pages it visited", () => {
+    const crawlResult = crawl();
     assert.ok(
       crawlResult.summary.highIntentElements > 0,
       "crawl found no high-intent elements at all"
@@ -97,6 +116,7 @@ describe("BenchmarkShop crawl", { skip: gate.skip }, () => {
   });
 
   it("recovers the frozen navigation locators the ground truth promises", () => {
+    const crawlResult = crawl();
     const locators = crawlResult.session.pages
       .flatMap((p) => p.highIntentElements)
       .map((el) => el.locator)
@@ -112,6 +132,7 @@ describe("BenchmarkShop crawl", { skip: gate.skip }, () => {
   });
 
   it("reports per-page failures rather than silently dropping pages", () => {
+    const crawlResult = crawl();
     const { pagesVisited, failedPages = 0 } = crawlResult.summary;
     assert.equal(
       pagesVisited + failedPages,
@@ -127,6 +148,7 @@ describe("BenchmarkShop crawl", { skip: gate.skip }, () => {
   });
 
   it("gives every crawled page a well-formed shape", () => {
+    const crawlResult = crawl();
     for (const page of crawlResult.session.pages) {
       assert.ok(page.url.startsWith("http"), `bad page url: ${page.url}`);
       assert.equal(typeof page.title, "string");
@@ -140,6 +162,7 @@ describe("BenchmarkShop crawl", { skip: gate.skip }, () => {
   });
 
   it("produces inferred journeys for a shop-shaped site", () => {
+    const crawlResult = crawl();
     const journeys = crawlResult.inferredJourneys ?? [];
     assert.ok(
       journeys.length > 0,
@@ -156,6 +179,7 @@ describe("BenchmarkShop crawl", { skip: gate.skip }, () => {
   });
 
   it("stays within the configured page budget", () => {
+    const crawlResult = crawl();
     assert.ok(
       crawlResult.session.pages.length <= 8,
       `maxPages was 8 but ${crawlResult.session.pages.length} pages were crawled`

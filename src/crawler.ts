@@ -1,4 +1,5 @@
 import fs from "fs";
+import os from "os";
 import path from "path";
 import { fileURLToPath } from "url";
 import { Builder, WebDriver, WebElement, logging } from "selenium-webdriver";
@@ -25,13 +26,30 @@ export interface CrawlAnalyzeOptions {
 export class SiteCrawler {
   private driver: WebDriver | null = null;
   private biDiEnabled: boolean = false;
+  private userDataDir: string | null = null;
 
   /** Build and launch a headless Chrome driver with BiDi enabled. */
   async init(): Promise<void> {
     const options = new chrome.Options();
+
+    // A dedicated profile per crawler instance. Two reasons:
+    //  1. Chrome ignores --disable-web-security unless --user-data-dir is also
+    //     set, so without this the CSP bypass below silently does nothing.
+    //  2. Concurrent crawls would otherwise contend for the default profile's
+    //     lock file.
+    this.userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "webmcp-chrome-"));
+
     options.addArguments(
+      // Headless unless explicitly asked for a visible browser. This was
+      // missing despite the class being documented as headless, so any
+      // environment without a display (CI, containers, remote shells) failed
+      // with "Chrome instance exited" at session creation.
+      ...(process.env.WEBMCP_HEADED === "1" ? [] : ["--headless=new"]),
       "--no-sandbox",
       "--disable-dev-shm-usage",
+      "--disable-gpu",
+      "--window-size=1280,900",
+      `--user-data-dir=${this.userDataDir}`,
       "--log-level=3",
       // Allows the injected analyzer bundle to bypass CSP headers set by the
       // target page. Risk: cross-origin protections are disabled for this
@@ -238,6 +256,16 @@ export class SiteCrawler {
     if (this.driver) {
       await this.driver.quit();
       this.driver = null;
+    }
+    // Remove the throwaway profile. Best effort: a leaked temp directory must
+    // not turn into a failed crawl.
+    if (this.userDataDir) {
+      try {
+        fs.rmSync(this.userDataDir, { recursive: true, force: true });
+      } catch {
+        // ignore
+      }
+      this.userDataDir = null;
     }
   }
 
