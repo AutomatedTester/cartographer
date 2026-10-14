@@ -24,7 +24,12 @@ that produced it.
 
 One hard rule:
 
+> **Commits must be authored under your own name, not the tool's.**
 > **Do not credit an AI as an author of a commit.**
+
+This holds no matter how much of the change a tool wrote. If an agent made the
+commit for you, the author and committer must still be you, with your own name
+and email.
 
 Commit authorship records the person accountable for the change. An AI is a
 tool, not a contributor, and it cannot answer questions in review, respond to a
@@ -53,7 +58,7 @@ or strip it before you push:
 
 | Tool | How |
 |---|---|
-| Claude Code | `includeCoAuthoredBy: false` in `.claude/settings.json` |
+| Claude Code | `"attribution": { "commit": "", "pr": "" }` in `.claude/settings.json` (older versions: `includeCoAuthoredBy: false`) |
 | GitHub Copilot | Disable commit co-authorship in editor settings |
 | Any tool | `git commit --amend` and delete the trailer before pushing |
 

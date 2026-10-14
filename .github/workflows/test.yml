@@ -96,11 +96,13 @@ jobs:
     - name: Build project
       run: npm run build && npm run build:browser
 
-    - name: Set up Chrome
-      uses: browser-actions/setup-chrome@v1
-      with:
-        chrome-version: stable
-        install-chromedriver: true
+    # No setup-chrome step: it put its own ChromeDriver on PATH while Selenium
+    # launched the runner's preinstalled google-chrome, and the two drifted
+    # apart ("This version of ChromeDriver only supports Chrome version N").
+    # Selenium Manager resolves a driver matching the installed Chrome, which
+    # is also the path users take.
+    - name: Show Chrome version
+      run: google-chrome --version
 
     # REQUIRE_BROWSER=1 makes a browser that will not start a hard failure.
     # Without it a broken driver silently skips the crawl suite and the job
