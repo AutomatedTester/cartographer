@@ -78,6 +78,50 @@ describe("MarkdownExporter.exportFull", () => {
     );
     assert.match(md, /model load timed out/);
   });
+
+  it("reports zero LLM tokens and the ML device in the summary", () => {
+    const md = MarkdownExporter.exportFull(
+      analysisResult({
+        metrics: {
+          device: "webnn",
+          modelLoadTime: 120.4,
+          analysisTime: 80.6,
+          deduplicationTime: 3.2,
+          elementsAnalyzed: 12,
+          elementsClustered: 4,
+          tokensUsed: 0,
+        },
+      })
+    );
+    assert.match(md, /\*\*Analysis Device:\*\* WEBNN \(browser-side ML/);
+    assert.match(md, /\*\*LLM Tokens Used:\*\* 0 \(no cloud LLM calls/);
+    assert.match(md, /### Performance Metrics/);
+    assert.match(md, /\*\*Model Load Time:\*\* 120ms/);
+    assert.match(md, /\*\*Elements After Clustering:\*\* 4/);
+  });
+
+  it("does not claim ML inference when the heuristic fallback ran", () => {
+    const md = MarkdownExporter.exportFull(
+      analysisResult({ metrics: { device: "none", tokensUsed: 0 } })
+    );
+    assert.match(md, /\*\*Analysis Device:\*\* none \(heuristic scoring/);
+    assert.doesNotMatch(md, /browser-side ML/);
+  });
+
+  it("says the device is unknown rather than guessing when metrics are absent", () => {
+    const md = MarkdownExporter.exportFull(analysisResult());
+    assert.match(md, /\*\*Analysis Device:\*\* unknown/);
+    assert.match(md, /\*\*LLM Tokens Used:\*\* 0/);
+    assert.doesNotMatch(md, /### Performance Metrics/);
+  });
+
+  it("renders partial metrics without throwing", () => {
+    const md = MarkdownExporter.exportFull(
+      analysisResult({ metrics: { elementsAnalyzed: 0, analysisTime: 0 } })
+    );
+    assert.match(md, /\*\*DOM Analysis Time:\*\* 0ms/);
+    assert.match(md, /\*\*Model Load Time:\*\* unknown/);
+  });
 });
 
 describe("MarkdownExporter.exportTestCases", () => {

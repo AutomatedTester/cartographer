@@ -112,12 +112,22 @@ export class MarkdownExporter {
                 )
                 : 0;
 
+        const device = result.metrics?.device;
+        const deviceLine = !device
+            ? "unknown"
+            : device === "none"
+                ? "none (heuristic scoring — ML unavailable)"
+                : `${device.toUpperCase()} (browser-side ML — no cloud API calls)`;
+        const tokensUsed = result.metrics?.tokensUsed ?? 0;
+
         return `## Executive Summary
 
 - **Total Elements Analyzed:** ${elementCount}
 - **Auto-Generated Test Cases:** ${testCount}
 - **Average Intent Score:** ${avgScore}/100
 - **Page Title:** ${result.title}
+- **Analysis Device:** ${deviceLine}
+- **LLM Tokens Used:** ${tokensUsed} (no cloud LLM calls — all analysis runs locally)
 
 This report identifies high-intent user interaction points and generates starter test cases that can be customized and extended.
 `;
@@ -270,6 +280,22 @@ This report identifies high-intent user interaction points and generates starter
         lines.push(
             `- Average: ${Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)}`
         );
+
+        // Performance metrics. Fields may be missing on results from older or
+        // partial runs, so render "unknown" rather than throwing.
+        if (result.metrics) {
+            const m = result.metrics;
+            const ms = (v: number | undefined) => (v === undefined ? "unknown" : `${v.toFixed(0)}ms`);
+            lines.push("");
+            lines.push("### Performance Metrics");
+            lines.push(`- **Inference Device:** ${m.device ?? "unknown"}`);
+            lines.push(`- **LLM Tokens Used:** ${m.tokensUsed ?? 0}`);
+            lines.push(`- **Model Load Time:** ${ms(m.modelLoadTime)}`);
+            lines.push(`- **DOM Analysis Time:** ${ms(m.analysisTime)}`);
+            lines.push(`- **Deduplication Time:** ${ms(m.deduplicationTime)}`);
+            lines.push(`- **Elements Analyzed:** ${m.elementsAnalyzed ?? "unknown"}`);
+            lines.push(`- **Elements After Clustering:** ${m.elementsClustered ?? "unknown"}`);
+        }
 
         return lines.join("\n");
     }
