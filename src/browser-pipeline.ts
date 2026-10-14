@@ -113,6 +113,7 @@ export class BrowserAnalysisPipeline {
       deduplicationTime: 0,
       elementsAnalyzed: elements.length,
       elementsClustered: highIntentElements.length,
+      tokensUsed: 0,
     };
 
     const totalTime = performance.now() - startTime;
