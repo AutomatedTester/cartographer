@@ -14,6 +14,8 @@
     "test": "npm run test:unit && npm run test:integration",
     "test:unit": "node --test test/unit/*.test.js",
     "test:integration": "node --test test/integration/*.test.js",
+    "pretest:coverage": "npm run build && npm run build:browser",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include='build/**' --test-coverage-exclude='build/test/**' --test-coverage-exclude='build/analyzer.browser.js' --test-coverage-exclude='build/types.js' --test-coverage-lines=87 --test-coverage-branches=88 --test-coverage-functions=90 test/unit/*.test.js",
     "benchmark:install": "npm --prefix benchmark/app install --no-audit --no-fund"
   },
   "dependencies": {

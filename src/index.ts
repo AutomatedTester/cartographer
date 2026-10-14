@@ -9,6 +9,8 @@
  *                         element using cached crawl data.
  */
 
+import { pathToFileURL } from "node:url";
+
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -827,13 +829,32 @@ function formatMultiPageCrawlMarkdown(result: MultiPageCrawlResult, sessionId: s
 // Bootstrap
 // ---------------------------------------------------------------------------
 
+/**
+ * The configured MCP server, exported so it can be driven in-process.
+ *
+ * Tests connect this to an in-memory transport instead of spawning the binary.
+ * Running the server in a child process means none of this file's request
+ * handlers are visible to coverage, which is why its 839 lines read as
+ * completely untested while being exercised on every integration run.
+ */
+export { server };
+
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
   console.error("WebMCP-Selenium MCP server running on stdio");
 }
 
-main().catch((err) => {
-  console.error("Fatal error:", err);
-  process.exit(1);
-});
+// Only auto-start when executed directly. Importing this module — which is how
+// the in-process tests reach `server` — must not seize stdio, or the importing
+// process's own stdout becomes a protocol stream.
+const executedDirectly =
+  process.argv[1] !== undefined &&
+  import.meta.url === pathToFileURL(process.argv[1]).href;
+
+if (executedDirectly) {
+  main().catch((err) => {
+    console.error("Fatal error:", err);
+    process.exit(1);
+  });
+}
