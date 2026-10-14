@@ -100,6 +100,17 @@ describe("MarkdownExporter.exportFull", () => {
     assert.match(md, /\*\*Elements After Clustering:\*\* 4/);
   });
 
+  it("renders the reported token count rather than a fixed zero", () => {
+    const md = MarkdownExporter.exportFull(
+      analysisResult({ metrics: { device: "wasm", tokensUsed: 42 } })
+    );
+    const tokenLines = md.split("\n").filter((l) => l.includes("LLM Tokens Used"));
+    assert.equal(tokenLines.length, 2, "summary and performance metrics both report tokens");
+    for (const line of tokenLines) {
+      assert.match(line, /\*\*LLM Tokens Used:\*\* 42\b/);
+    }
+  });
+
   it("does not claim ML inference when the heuristic fallback ran", () => {
     const md = MarkdownExporter.exportFull(
       analysisResult({ metrics: { device: "none", tokensUsed: 0 } })

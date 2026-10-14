@@ -209,6 +209,15 @@ describe("BrowserAnalysisPipeline.analyzeElements: path selection", () => {
     assert.equal(result.metrics.device, "wasm");
   });
 
+  it("reports zero LLM tokens on both the ML and heuristic paths", async () => {
+    const heuristic = await new BrowserAnalysisPipeline().analyzeElements([deleteButton]);
+    assert.equal(heuristic.metrics.tokensUsed, 0);
+
+    enableMl();
+    const ml = await new BrowserAnalysisPipeline().analyzeElements([deleteButton]);
+    assert.equal(ml.metrics.tokensUsed, 0);
+  });
+
   it("falls back to heuristics when the caller opts out of ML", async () => {
     enableMl();
     const pipeline = new BrowserAnalysisPipeline();

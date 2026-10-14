@@ -111,6 +111,19 @@ describe("analyzeCurrentPage result shape", () => {
 
     assert.equal(result.metrics.device, "none");
   });
+
+  it("reports zero LLM tokens on the ML path", async () => {
+    const { result } = await analyze({ globals: { webnn: true } });
+    assert.equal(result.metrics.tokensUsed, 0);
+  });
+
+  it("reports zero LLM tokens on the heuristic path", async () => {
+    const { result } = await analyze({
+      globals: { webnn: false },
+      stub: { failDevices: ["webgpu", "wasm"] },
+    });
+    assert.equal(result.metrics.tokensUsed, 0);
+  });
 });
 
 describe("analyzeCurrentPage heuristic fallback", () => {
