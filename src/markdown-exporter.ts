@@ -1,4 +1,5 @@
-import { AnalysisResult, GeneratedTestCase, TestPriority, DetectedWorkflow, CrawlSession } from "./types.js";
+import { AnalysisResult, AriaAuditReport, AriaAdvisorySeverity, GeneratedTestCase, TestPriority, DetectedWorkflow, CrawlSession } from "./types.js";
+import { ARIA_ADVISORY_PREAMBLE, ARIA_ADVISORY_REFERENCE } from "./aria-auditor.js";
 
 /**
  * MarkdownExporter formats analysis results and test cases into readable markdown
@@ -36,7 +37,78 @@ export class MarkdownExporter {
         // Statistics
         sections.push(this.formatStatistics(result));
 
+        // ARIA advisory, only when the caller asked for one
+        if (result.ariaAudit) {
+            sections.push(this.exportAriaAudit(result.ariaAudit, 2));
+        }
+
         return sections.join("\n\n");
+    }
+
+    /**
+     * Export an ARIA advisory report. Every finding says how the markup comes
+     * across to a user, what to do, and what deleting the ARIA would lose.
+     *
+     * @param level heading level for the report title, so it can be embedded
+     */
+    static exportAriaAudit(report: AriaAuditReport, level = 1): string {
+        const h = (n: number) => "#".repeat(level + n);
+        const code = (text: string) => "`" + text.replace(/`/g, "'") + "`";
+        const lines: string[] = [];
+
+        lines.push(`${h(0)} ARIA Advisory${report.title ? `: ${report.title}` : ""}`);
+        lines.push("");
+        lines.push(`**URL:** ${report.url}`);
+        lines.push("");
+        lines.push(`> ${ARIA_ADVISORY_PREAMBLE} ([why](${ARIA_ADVISORY_REFERENCE}))`);
+        lines.push("");
+
+        if (report.error) {
+            lines.push(`The ARIA advisory could not be produced: ${report.error}`);
+            return lines.join("\n");
+        }
+
+        const { summary } = report;
+        lines.push(`Scanned ${report.elementsScanned} elements, ${report.elementsWithAria} of which carry ARIA.` +
+            (report.truncated ? " The page hit the element cap, so this report is partial." : ""));
+        lines.push("");
+
+        if (summary.total === 0) {
+            lines.push("None of the checked ARIA misuse patterns were found. That does not mean the page is accessible. It means the ARIA it uses doesn't trip any of these checks.");
+            return lines.join("\n");
+        }
+
+        lines.push("| Severity | Advisories |");
+        lines.push("|----------|-----------|");
+        lines.push(`| High | ${summary.high} |`);
+        lines.push(`| Medium | ${summary.medium} |`);
+        lines.push(`| Low | ${summary.low} |`);
+        lines.push("");
+        if (summary.safeToRemove > 0) {
+            lines.push(`**${summary.safeToRemove} of ${summary.total}** can be fixed by deleting ARIA, and users lose nothing they get from it today.`);
+            lines.push("");
+        }
+
+        const order: AriaAdvisorySeverity[] = ["high", "medium", "low"];
+        for (const severity of order) {
+            const group = report.findings.filter((f) => f.severity === severity);
+            if (group.length === 0) continue;
+            lines.push(`${h(1)} ${severity[0].toUpperCase()}${severity.slice(1)} (${group.length})`);
+            lines.push("");
+            for (const finding of group) {
+                lines.push(`${h(2)} ${finding.title}`);
+                lines.push("");
+                lines.push(`- **Element:** ${code(finding.locator)}: ${code(finding.snippet)}`);
+                lines.push(`- **What's wrong:** ${finding.problem}`);
+                lines.push(`- **What a user experiences:** ${finding.userExperience}`);
+                lines.push(`- **Advice:** ${finding.advice}`);
+                lines.push(`- **If you remove this ARIA:** ${finding.ifRemoved}`);
+                lines.push(`- **Reference:** ${finding.reference}`);
+                lines.push("");
+            }
+        }
+
+        return lines.join("\n");
     }
 
     /**

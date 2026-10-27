@@ -1,0 +1,71 @@
+<%- include('partials/header', { title }) %>
+
+<%#
+  ARIA lab: a fixture for the ARIA advisory (audit_aria).
+
+  Deliberately unlinked from the site navigation so the crawl ground truth in
+  benchmark/ground-truth/journeys.json is unaffected. The "bad" section is
+  ARIA that makes the page worse than plain HTML would; the "good" section is
+  correct ARIA that must not attract advice. integration/aria-audit.test.js
+  asserts on both by id.
+%>
+
+<section id="aria-lab">
+  <h1 id="aria-lab-heading">ARIA Lab</h1>
+
+  <div id="lab-bad">
+    <h2>Bad ARIA</h2>
+
+    <div id="bad-div-button" role="button" class="btn btn-primary">Add to basket</div>
+
+    <a id="bad-hidden-link" href="/deals" aria-hidden="true">Today's deals</a>
+
+    <button id="bad-label-mismatch" type="button" aria-label="Submit order form">Buy now</button>
+
+    <span id="bad-typo-role" role="buton">Fake button</span>
+
+    <button id="bad-expanded-value" type="button" aria-expanded="yes">Filters</button>
+
+    <button id="bad-describedby" type="button" aria-describedby="does-not-exist">Help</button>
+
+    <button id="bad-checked-on-button" type="button" aria-checked="true">Bold</button>
+
+    <div id="bad-empty-tablist" role="tablist">
+      <span>Not a tab</span>
+    </div>
+
+    <div id="bad-named-div" aria-label="Product specifications">Weight: 1.2kg</div>
+
+    <button id="bad-redundant" type="button" role="button">Redundant</button>
+
+    <div id="bad-hidden-wrapper" aria-hidden="true">
+      <button id="bad-hidden-wrapper-btn" type="button">Hidden but focusable</button>
+    </div>
+  </div>
+
+  <div id="lab-good">
+    <h2>Good ARIA</h2>
+
+    <button id="good-toggle" type="button" aria-pressed="false">Mute</button>
+
+    <button id="good-disclosure" type="button" aria-expanded="false" aria-controls="good-panel">Details</button>
+    <div id="good-panel" hidden>More details</div>
+
+    <button id="good-label-in-name" type="button" aria-label="Save draft">Save</button>
+
+    <div id="good-tablist" role="tablist" aria-label="Sections">
+      <button id="good-tab-1" type="button" role="tab" aria-selected="true">One</button>
+      <button id="good-tab-2" type="button" role="tab" aria-selected="false" tabindex="-1">Two</button>
+    </div>
+
+    <label for="good-email">Email</label>
+    <input id="good-email" type="email" aria-describedby="good-email-hint" aria-required="true">
+    <p id="good-email-hint">We never share it.</p>
+
+    <span id="good-decoration" aria-hidden="true">★★★</span>
+
+    <div id="good-custom-button" role="button" tabindex="0">Custom, focusable</div>
+  </div>
+</section>
+
+<%- include('partials/footer') %>

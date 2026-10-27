@@ -103,6 +103,36 @@ describe("MCP handlers: tool advertisement", () => {
   });
 });
 
+describe("MCP handlers: ARIA advisory is opt-in", () => {
+  it("offers audit_aria as its own tool, described as advice", async () => {
+    const { tools } = await client.listTools();
+    const audit = tools.find((t) => t.name === "audit_aria");
+
+    assert.ok(audit, "audit_aria should be advertised");
+    assert.deepEqual(audit.inputSchema.required, ["url"]);
+    assert.deepEqual(audit.inputSchema.properties.format.enum, ["json", "markdown"]);
+    assert.match(audit.description, /No ARIA is better than bad ARIA/);
+    assert.match(audit.description, /what would be lost/);
+    assert.match(audit.description, /never reports a failure/);
+  });
+
+  it("leaves the ARIA advisory off crawl_and_analyze unless asked for", async () => {
+    const { tools } = await client.listTools();
+    const flag = tools.find((t) => t.name === "crawl_and_analyze").inputSchema
+      .properties.ariaAudit;
+
+    assert.equal(flag.type, "boolean");
+    assert.equal(flag.default, false);
+  });
+
+  it("validates audit_aria arguments before starting a browser", async () => {
+    await assert.rejects(() => call("audit_aria", {}));
+    await assert.rejects(() => call("audit_aria", { url: "not a url" }));
+    await assert.rejects(() => call("audit_aria", { url: "https://x.test/", format: "pdf" }));
+    await assert.rejects(() => call("crawl_and_analyze", { url: "https://x.test/", ariaAudit: "yes" }));
+  });
+});
+
 describe("MCP handlers: argument validation", () => {
   it("rejects an unknown tool as an error result, not a crash", async () => {
     const result = await call("definitely_not_a_tool", {});

@@ -4,14 +4,18 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { Builder, WebDriver, WebElement, logging } from "selenium-webdriver";
 import chrome from "selenium-webdriver/chrome.js";
-import { AnalysisResult } from "./types.js";
+import { AnalysisResult, AriaAuditReport, AriaSnapshot } from "./types.js";
 import { SemanticHandlerGenerator } from "./webmcp-semantic-handlers.js";
+import { collectAriaSnapshot } from "./aria-collector.js";
+import { ARIA_ROLES, auditAriaSnapshot, failedAriaAudit } from "./aria-auditor.js";
 
 export interface CrawlAnalyzeOptions {
   scriptTimeoutMs?: number;
   pageLoadTimeoutMs?: number;
   analyzerTimeoutMs?: number;
   analyzerInitTimeoutMs?: number;
+  /** Attach an ARIA advisory report. Off unless asked for. */
+  ariaAudit?: boolean;
 }
 
 /**
@@ -258,7 +262,39 @@ export class SiteCrawler {
       (entry) => `[${entry.level.name}] ${entry.message}`
     );
 
+    if (options.ariaAudit) {
+      result.ariaAudit = await this.auditCurrentPage();
+    }
+
     return result;
+  }
+
+  /**
+   * Navigate to a URL and produce an ARIA advisory report for it. Does not
+   * load the ML model or run the test-candidate analysis.
+   */
+  async auditAria(url: string, pageLoadTimeoutMs: number = 60_000): Promise<AriaAuditReport> {
+    if (!this.driver) {
+      throw new Error("SiteCrawler is not initialized. Call init() first.");
+    }
+    await this.driver.manage().setTimeouts({ pageLoad: pageLoadTimeoutMs });
+    await this.driver.get(url);
+    return this.auditCurrentPage();
+  }
+
+  /**
+   * ARIA advisory for whatever page the driver is on. The advisory must never
+   * break a crawl, so a failure becomes a report carrying the error.
+   */
+  private async auditCurrentPage(): Promise<AriaAuditReport> {
+    const driver = this.driver!;
+    try {
+      const snapshot = await driver.executeScript<AriaSnapshot>(collectAriaSnapshot, [...ARIA_ROLES]);
+      return auditAriaSnapshot(snapshot);
+    } catch (err) {
+      const url = await driver.getCurrentUrl().catch(() => "");
+      return failedAriaAudit(url, err);
+    }
   }
 
   /** Quit the browser and release resources. */
