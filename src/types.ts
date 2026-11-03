@@ -121,6 +121,114 @@ export interface AnalysisResult {
     allNavigationLinks?: string[];
     /** Performance and device metrics for this analysis */
     metrics?: AnalysisMetrics;
+    /** ARIA advisory report; only present when the caller asked for one */
+    ariaAudit?: AriaAuditReport;
+}
+
+/**
+ * ============================================================================
+ * ARIA ADVISORY TYPE DEFINITIONS
+ * ============================================================================
+ */
+
+/**
+ * One element as seen by the in-page ARIA collector. Everything the rules need
+ * that depends on the live DOM (focusability, rendering, id resolution, the
+ * roles around the element) is resolved in the page, so the rules themselves
+ * are pure functions over this snapshot.
+ */
+export interface AriaNodeSnapshot {
+    tag: string;
+    locator: string;
+    /** Opening tag as written, truncated, for showing the author what was found */
+    snippet: string;
+    /** The role attribute exactly as authored, if any */
+    roleAttr?: string;
+    /** Role the browser exposes: first valid token of roleAttr, else the native role */
+    effectiveRole: string | null;
+    /** Role the element would have with no role attribute */
+    implicitRole: string | null;
+    /** Every aria-* attribute on the element */
+    ariaAttributes: Record<string, string>;
+    focusable: boolean;
+    tabbable: boolean;
+    /** Native control (button, a[href], input, select, textarea, summary) */
+    nativelyInteractive: boolean;
+    disabled: boolean;
+    /** Approximation of the accessible name computation */
+    accessibleName: string;
+    nameSource: 'aria-labelledby' | 'aria-label' | 'native' | 'content' | 'title' | 'none';
+    /** Text a sighted user sees inside the element */
+    visibleText: string;
+    /** IDREF attributes whose ids do not exist in the document */
+    missingIdrefs: Record<string, string[]>;
+    /** Nearest ancestor role, skipping generic and presentational wrappers */
+    parentRole: string | null;
+    /** Roles of owned elements, looking through generic and presentational wrappers */
+    ownedRoles: string[];
+    /** Inside an aria-hidden="true" subtree, so absent from the accessibility tree */
+    inAriaHiddenSubtree: boolean;
+    /** Number of focusable descendants */
+    focusableDescendants: number;
+}
+
+/** Everything the collector found on one page. */
+export interface AriaSnapshot {
+    url: string;
+    title: string;
+    elements: AriaNodeSnapshot[];
+    /** Elements walked, including those without ARIA */
+    elementsScanned: number;
+    /** True when the element cap was hit and the snapshot is partial */
+    truncated: boolean;
+}
+
+export type AriaAdvisorySeverity = 'high' | 'medium' | 'low';
+
+/** The kind of change the advice recommends. */
+export type AriaFixKind = 'remove-aria' | 'change-aria' | 'add-aria' | 'use-native-html';
+
+/** One piece of advice about ARIA on the page. Advisory: never a pass/fail. */
+export interface AriaFinding {
+    ruleId: string;
+    title: string;
+    severity: AriaAdvisorySeverity;
+    locator: string;
+    snippet: string;
+    role: string | null;
+    /** What is wrong with the markup */
+    problem: string;
+    /** How it comes across to someone using a screen reader, voice control or keyboard */
+    userExperience: string;
+    advice: string;
+    fix: AriaFixKind;
+    /** What a user would lose if the offending ARIA were simply deleted */
+    ifRemoved: string;
+    /** True when deleting the ARIA loses nothing users currently get from it */
+    safeToRemove: boolean;
+    reference: string;
+}
+
+/** The ARIA advisory report for one page. */
+export interface AriaAuditReport {
+    url: string;
+    title: string;
+    /** Always true: this report gives advice, it does not pass or fail a page */
+    advisory: true;
+    elementsScanned: number;
+    elementsWithAria: number;
+    truncated: boolean;
+    findings: AriaFinding[];
+    summary: {
+        total: number;
+        high: number;
+        medium: number;
+        low: number;
+        /** Findings fixable by deleting ARIA without losing anything */
+        safeToRemove: number;
+    };
+    /** Set when the audit could not run; the rest of the report is then empty */
+    error?: string;
 }
 
 /** Result of executing a single test */

@@ -2,11 +2,13 @@
 /**
  * WebMCP-Selenium – MCP server entry point.
  *
- * Exposes two tools:
+ * Exposes, among others:
  *   crawl_and_analyze   – Crawls a URL and returns AI-generated test
  *                         recommendations.
  *   get_element_locator – Returns the most stable locator for a described
  *                         element using cached crawl data.
+ *   audit_aria          – On request, advises on ARIA that is likely to make
+ *                         the page harder to use with assistive technology.
  */
 
 import { pathToFileURL } from "node:url";
@@ -87,6 +89,12 @@ function evictExpiredSessions(): void {
 const CrawlAndAnalyzeInput = z.object({
   url: z.string().url({ message: "A valid URL is required." }),
   format: z.enum(["json", "markdown", "markdown-summary"]).optional().default("markdown"),
+  ariaAudit: z.boolean().optional().default(false),
+});
+
+const AuditAriaInput = z.object({
+  url: z.string().url({ message: "A valid URL is required." }),
+  format: z.enum(["json", "markdown"]).optional().default("markdown"),
 });
 
 const GetElementLocatorInput = z.object({
@@ -158,6 +166,32 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
             type: "string",
             enum: ["json", "markdown", "markdown-summary"],
             description: "Output format: 'json' for structured data, 'markdown' for full report with test cases, 'markdown-summary' for concise list",
+            default: "markdown",
+          },
+          ariaAudit: {
+            type: "boolean",
+            description: "Also return an ARIA advisory for the page (see audit_aria). Off unless requested.",
+            default: false,
+          },
+        },
+        required: ["url"],
+      },
+    },
+    {
+      name: "audit_aria",
+      description:
+        "Advisory review of the ARIA on a page. No ARIA is better than bad ARIA: this points out roles, states and references that are likely to mislead screen reader, voice control or keyboard users. For each one it explains what the user experiences, what to do instead, and what would be lost if the ARIA were removed. Gives advice only and never reports a failure.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          url: {
+            type: "string",
+            description: "The fully-qualified URL to review (e.g. https://example.com).",
+          },
+          format: {
+            type: "string",
+            enum: ["json", "markdown"],
+            description: "Output format: 'markdown' for a readable advisory (default) or 'json' for structured findings.",
             default: "markdown",
           },
         },
@@ -349,11 +383,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   if (name === "crawl_and_analyze") {
-    const { url, format } = CrawlAndAnalyzeInput.parse(args);
+    const { url, format, ariaAudit } = CrawlAndAnalyzeInput.parse(args);
 
     try {
       await crawler.init();
-      lastAnalysis = await crawler.crawlAndAnalyze(url);
+      lastAnalysis = await crawler.crawlAndAnalyze(url, 25, { ariaAudit });
     } finally {
       await crawler.close();
     }
@@ -366,6 +400,9 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       output = lastAnalysis.generatedTestCases
         ? MarkdownExporter.exportTestCasesList(lastAnalysis.generatedTestCases)
         : "No test cases generated";
+      if (lastAnalysis.ariaAudit) {
+        output += "\n\n" + MarkdownExporter.exportAriaAudit(lastAnalysis.ariaAudit, 2);
+      }
     } else {
       // Default to "markdown" - full report
       output = MarkdownExporter.exportFull(lastAnalysis);
@@ -376,6 +413,42 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         {
           type: "text" as const,
           text: output,
+        },
+      ],
+    };
+  }
+
+  if (name === "audit_aria") {
+    const { url, format } = AuditAriaInput.parse(args);
+
+    // A separate crawler so an audit never disturbs lastAnalysis or the
+    // shared crawl browser.
+    const auditor = new SiteCrawler();
+    let report;
+    try {
+      await auditor.init();
+      report = await auditor.auditAria(url);
+    } catch (error) {
+      // The page could not be loaded at all. That is a tool failure, unlike
+      // findings, which are advice and never an error.
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `ARIA advisory could not run: ${error instanceof Error ? error.message : String(error)}`,
+          },
+        ],
+        isError: true,
+      };
+    } finally {
+      await auditor.close().catch(() => {});
+    }
+
+    return {
+      content: [
+        {
+          type: "text" as const,
+          text: format === "json" ? JSON.stringify(report, null, 2) : MarkdownExporter.exportAriaAudit(report),
         },
       ],
     };

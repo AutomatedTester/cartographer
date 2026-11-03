@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 
 import { MarkdownExporter } from "../../build/markdown-exporter.js";
 import { TestCaseGenerator } from "../../build/test-case-generator.js";
+import { failedAriaAudit } from "../../build/aria-auditor.js";
+import { h, auditOf } from "../helpers/aria-dom.js";
 
 function element(overrides = {}) {
   return {
@@ -541,5 +543,74 @@ describe("MarkdownExporter.exportWorkflowComparison", () => {
   it("handles an empty workflow list without throwing", () => {
     const md = MarkdownExporter.exportWorkflowComparison([]);
     assert.match(md, /\*\*Workflows Compared:\*\* 0/);
+  });
+});
+
+describe("MarkdownExporter.exportAriaAudit", () => {
+  const report = auditOf(
+    [
+      h("div", { id: "save", role: "button" }, "Save"),
+      h("button", { id: "go", role: "button", "aria-label": "Use `go`" }, "Use `go`"),
+      h("span", { id: "typo", "aria-lable": "x" }),
+    ],
+    { title: "Checkout", url: "https://shop.test/checkout" }
+  );
+
+  it("opens with the first rule of ARIA and says it is advisory", () => {
+    const md = MarkdownExporter.exportAriaAudit(report);
+
+    assert.match(md, /^# ARIA Advisory: Checkout/);
+    assert.match(md, /No ARIA is better than bad ARIA/);
+    assert.match(md, /nothing here fails a run/);
+    assert.match(md, /\*\*URL:\*\* https:\/\/shop\.test\/checkout/);
+  });
+
+  it("gives every finding the user impact, the advice and what removal would lose", () => {
+    const md = MarkdownExporter.exportAriaAudit(report);
+
+    assert.equal((md.match(/\*\*What a user experiences:\*\*/g) ?? []).length, report.summary.total);
+    assert.equal((md.match(/\*\*If you remove this ARIA:\*\*/g) ?? []).length, report.summary.total);
+    assert.equal((md.match(/\*\*Advice:\*\*/g) ?? []).length, report.summary.total);
+  });
+
+  it("groups by severity, most serious first, and counts the safe deletions", () => {
+    const md = MarkdownExporter.exportAriaAudit(report);
+
+    assert.ok(md.indexOf("## High") < md.indexOf("## Low"));
+    assert.match(md, /\| High \| 1 \|/);
+    assert.match(md, new RegExp(`\\*\\*${report.summary.safeToRemove} of ${report.summary.total}\\*\\* can be fixed by deleting ARIA`));
+  });
+
+  it("keeps backticks in markup from breaking inline code", () => {
+    const md = MarkdownExporter.exportAriaAudit(report);
+    assert.match(md, /`<button id="go" role="button" aria-label="Use 'go'">`/);
+  });
+
+  it("is honest about a clean result", () => {
+    const md = MarkdownExporter.exportAriaAudit(auditOf([h("button", { "aria-pressed": "true" }, "Bold")]));
+
+    assert.match(md, /None of the checked ARIA misuse patterns were found/);
+    assert.match(md, /does not mean the page is accessible/);
+    assert.doesNotMatch(md, /\| Severity \|/);
+  });
+
+  it("flags a partial scan", () => {
+    const md = MarkdownExporter.exportAriaAudit({ ...report, truncated: true });
+    assert.match(md, /report is partial/);
+  });
+
+  it("reports an audit that could not run without pretending the page is clean", () => {
+    const md = MarkdownExporter.exportAriaAudit(failedAriaAudit("https://x.test/", new Error("boom")));
+
+    assert.match(md, /could not be produced: boom/);
+    assert.doesNotMatch(md, /None of the checked/);
+  });
+
+  it("is embedded in the full report only when an audit was requested", () => {
+    assert.doesNotMatch(MarkdownExporter.exportFull(analysisResult()), /ARIA Advisory/);
+
+    const md = MarkdownExporter.exportFull(analysisResult({ ariaAudit: report }));
+    assert.match(md, /^## ARIA Advisory: Checkout/m);
+    assert.match(md, /^### High/m);
   });
 });

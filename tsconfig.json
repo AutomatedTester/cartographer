@@ -22,6 +22,8 @@
   "include": [
     "src/types.ts",
     "src/crawler.ts",
+    "src/aria-collector.ts",
+    "src/aria-auditor.ts",
     "src/test-case-generator.ts",
     "src/markdown-exporter.ts",
     "src/webmcp-semantic-tools.ts",

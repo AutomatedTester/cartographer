@@ -77,6 +77,9 @@ app.get('/about',   (req, res) => res.render('about',   { title: 'About Us' }));
 app.get('/deals',   (req, res) => res.render('deals',   { title: 'Current Deals', deals: DEALS }));
 app.get('/contact', (req, res) => res.render('contact', { title: 'Contact Us', success: false, error: null }));
 
+// Fixture for the ARIA advisory. Not linked from any page, so crawls never reach it.
+app.get('/aria-lab', (req, res) => res.render('aria-lab', { title: 'ARIA Lab' }));
+
 app.post('/contact', (req, res) => {
   const { name, email, message } = req.body;
   if (!name || !email || !message) {

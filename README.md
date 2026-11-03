@@ -64,6 +64,8 @@ Core modules that work together:
 | `src/test-case-generator.ts` | `TestCaseGenerator` – creates structured test cases from high-intent elements |
 | `src/webmcp-semantic-tools.ts` | `SemanticToolGenerator` – auto-generates domain-specific MCP tools |
 | `src/webmcp-semantic-handlers.ts` | `SemanticHandlerGenerator` – creates browser-side handlers for tools |
+| `src/aria-collector.ts` | `collectAriaSnapshot` – runs in the page; resolves roles, focusability, names and id references for elements carrying ARIA |
+| `src/aria-auditor.ts` | `auditAriaSnapshot` – advisory ARIA rules; for each problem, the user impact, advice and what removing the ARIA would lose |
 | `src/markdown-exporter.ts` | `MarkdownExporter` – formats output in multiple formats (JSON/Markdown) |
 | `src/test-executor.ts` | `TestExecutor` – orchestrates test execution in browser context |
 | `src/index.ts` | MCP server entry point; exposes three MCP tools over stdio |
@@ -137,6 +139,30 @@ Executes high-priority test cases (intent score ≥ 50) using auto-generated sem
 ```
 
 **Output**: Test execution results with pass/fail status and assertions. See [USAGE.md](USAGE.md#run_critical_tests) for details.
+
+### 4. `audit_aria`
+
+Advisory review of the ARIA on a page. The first rule of ARIA is that no ARIA is better than bad ARIA, and this tool points out the bad ARIA: roles, states and references likely to mislead someone using a screen reader, voice control or a keyboard.
+
+It only runs when requested, either by calling `audit_aria` or by passing `"ariaAudit": true` to `crawl_and_analyze`. It gives advice and never fails a run.
+
+**Input**
+
+```json
+{
+  "url": "https://example.com",
+  "format": "markdown"
+}
+```
+
+**Output**: An advisory per problem. Each one gives:
+
+- what is wrong;
+- what a user experiences;
+- what to do instead;
+- what would be lost if the ARIA were simply removed.
+
+Advisories where deleting the ARIA loses nothing are counted separately. See [USAGE.md](USAGE.md#tool-4-audit_aria).
 
 ---
 

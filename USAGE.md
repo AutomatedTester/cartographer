@@ -70,6 +70,7 @@ The server will expose three MCP tools over stdio:
 - `crawl_and_analyze`
 - `get_element_locator`
 - `run_critical_tests`
+- `audit_aria`
 
 ---
 
@@ -376,6 +377,74 @@ curl -X POST http://localhost:3000/tools/run_critical_tests \
   -d '{
     "testIds": ["test-1", "test-3"]
   }'
+```
+
+---
+
+### Tool 4: `audit_aria`
+
+An advisory review of the ARIA on a page. It is built on the first rule of ARIA, that no ARIA is better than bad ARIA, and looks for ARIA that makes the page harder to use than plain HTML would be.
+
+It runs only when requested:
+
+- call `audit_aria` directly (this does not load the ML model), or
+- pass `"ariaAudit": true` to `crawl_and_analyze` to get the advisory alongside the test analysis (in JSON as `ariaAudit`, in Markdown as an extra section).
+
+Findings are advice. They never turn a tool call into an error. `isError` is only set if the page could not be loaded at all.
+
+#### Input Schema
+
+```typescript
+interface AuditAriaInput {
+  url: string;                      // URL to review (required)
+  format?: 'json' | 'markdown';     // default: 'markdown'
+}
+```
+
+#### What every advisory contains
+
+| Field | Meaning |
+|---|---|
+| `problem` | What is wrong with the markup |
+| `userExperience` | How it comes across to someone using a screen reader, voice control or keyboard |
+| `advice` | What to do instead |
+| `ifRemoved` | What a user would lose if the ARIA were simply deleted |
+| `safeToRemove` | `true` when deleting the ARIA loses nothing users get from it today |
+| `severity` | `high` (blocks or misleads), `medium` (degrades), `low` (noise) |
+| `fix` | `remove-aria`, `change-aria`, `add-aria` or `use-native-html` |
+
+The summary counts `safeToRemove` advisories separately. They are bad ARIA that can simply be deleted.
+
+#### What it checks
+
+| Rule | Example |
+|---|---|
+| `widget-not-focusable` | `<div role="button">` with no tabindex |
+| `aria-hidden-focusable` | `aria-hidden="true"` on, or around, something Tab can reach |
+| `native-semantics-overridden` | `<button role="heading">` |
+| `missing-name` | `role="button"` with no text or label |
+| `label-not-in-name` | Visible "Buy now", `aria-label="Submit order form"` |
+| `links-as-menu` | Site navigation built from `role="menubar"` / `role="menuitem"` links |
+| `broken-idref` | `aria-describedby` pointing at a missing id |
+| `invalid-role` / `redundant-role` | `role="buton"`, `<button role="button">` |
+| `presentation-conflict` | `role="presentation"` on a focusable element |
+| `required-context` / `required-owned` | A `tab` outside a `tablist`; an empty `tablist` |
+| `invalid-attribute-value` / `unknown-attribute` | `aria-expanded="yes"`, `aria-lable` |
+| `unsupported-state` | `aria-checked` on a button |
+| `prohibited-name` | `aria-label` on a plain `<div>` |
+| `duplicate-main` / `indistinguishable-landmarks` | Two `main`s; two unnamed `nav`s |
+
+The rules are heuristics over the DOM, not a full accessibility tree. They are tuned to stay quiet when unsure. An empty report means none of these patterns were found, not that the page is accessible.
+
+#### Example (Markdown, abridged)
+
+```markdown
+### Announced as a control but cannot be reached from the keyboard
+
+- **Element:** `#add`: `<div id="add" role="button">`
+- **What a user experiences:** A screen reader announces "button", which promises a control. But Tab never reaches it...
+- **Advice:** Use the native element (<button>, <a href>, ...)...
+- **If you remove this ARIA:** The "button" announcement. That announcement is currently a promise the element can't keep...
 ```
 
 ---

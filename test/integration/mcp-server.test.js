@@ -11,6 +11,7 @@ import assert from "node:assert/strict";
 import { startServer, textOf } from "../helpers/mcp-harness.js";
 
 const EXPECTED_TOOLS = [
+  "audit_aria",
   "crawl_and_analyze",
   "crawl_multi_page",
   "export_workflow_visualization",

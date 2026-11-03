@@ -71,7 +71,9 @@ binary no longer starts.
 
 ## The browser gate
 
-Only `integration/benchmark-crawl.test.js` drives a real browser.
+`integration/benchmark-crawl.test.js` and `integration/aria-audit.test.js`
+drive a real browser. The ARIA suite audits BenchmarkShop's `/aria-lab` page,
+which is deliberately unlinked so the crawl ground truth never sees it.
 
 | Environment | Behaviour |
 |---|---|
