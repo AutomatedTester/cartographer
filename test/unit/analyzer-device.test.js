@@ -116,19 +116,41 @@ describe("analyzer pipeline options", () => {
 });
 
 describe("analyzer model selection", () => {
-  it("picks the lightweight model on a low-memory device", async () => {
+  // Both models must be sentence-embedding models that exist on the Hub. The
+  // old lightweight choice (distilbert-base-multilingual-cased under Xenova/)
+  // did not exist, so on most devices no model loaded at all.
+  it("picks the lightweight sentence model on a low-memory device", async () => {
     await initAnalyzer({ deviceMemory: 2 });
-    assert.match(stubState().calls[0].model, /distilbert/i);
+    assert.equal(stubState().calls[0].model, "Xenova/paraphrase-MiniLM-L3-v2");
   });
 
-  it("picks the lightweight model on a slow connection", async () => {
+  it("picks the lightweight sentence model on a slow connection", async () => {
     await initAnalyzer({ deviceMemory: 16, effectiveType: "2g" });
-    assert.match(stubState().calls[0].model, /distilbert/i);
+    assert.equal(stubState().calls[0].model, "Xenova/paraphrase-MiniLM-L3-v2");
+  });
+
+  it("treats 3g as a slow connection", async () => {
+    await initAnalyzer({ deviceMemory: 16, effectiveType: "3g" });
+    assert.equal(stubState().calls[0].model, "Xenova/paraphrase-MiniLM-L3-v2");
   });
 
   it("picks the accurate model on a high-memory device with a fast connection", async () => {
     await initAnalyzer({ deviceMemory: 8, effectiveType: "4g" });
-    assert.match(stubState().calls[0].model, /MiniLM/i);
+    assert.equal(stubState().calls[0].model, "Xenova/all-MiniLM-L6-v2");
+  });
+
+  it("picks the accurate model on a mid-range device", async () => {
+    // navigator.deviceMemory is capped and coarse; 4GB on 4g is an ordinary
+    // laptop and should not be pushed onto the smaller model.
+    await initAnalyzer({ deviceMemory: 4, effectiveType: "4g" });
+    assert.equal(stubState().calls[0].model, "Xenova/all-MiniLM-L6-v2");
+  });
+
+  it("exports the model ids it chooses between", async () => {
+    configureStub();
+    const { DEFAULT_MODEL, LIGHTWEIGHT_MODEL } = await loadAnalyzerModule();
+    assert.equal(DEFAULT_MODEL, "Xenova/all-MiniLM-L6-v2");
+    assert.equal(LIGHTWEIGHT_MODEL, "Xenova/paraphrase-MiniLM-L3-v2");
   });
 });
 

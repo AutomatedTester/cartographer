@@ -126,6 +126,8 @@ Returns the most stable CSS/XPath locator for an element described in natural la
 
 **Output**: Stable CSS or XPath locator string. See [USAGE.md](USAGE.md#get_element_locator) for examples.
 
+Elements are matched by meaning as well as by shared words, so "checkout button" can find a button labelled "Proceed to payment". This uses a local embedding model (`Xenova/all-MiniLM-L6-v2`, about 23 MB, downloaded from Hugging Face on first use). Set `WEBMCP_SEMANTIC_LOCATOR=off` to use keyword matching only.
+
 ### 3. `run_critical_tests`
 
 Executes high-priority test cases (intent score ≥ 50) using auto-generated semantic tools. Tests are run directly in browser via native DOM APIs.

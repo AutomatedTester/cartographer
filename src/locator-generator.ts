@@ -10,8 +10,12 @@
  * - "email input" → input[type="email"]
  * - "search box" → input[placeholder*="search"]
  * 
- * Expected Accuracy: 80-95%
- * Processing Time: <50ms
+ * When the caller also passes a semantic similarity per element (see
+ * SemanticMatcher), elements are ranked by meaning first and keyword overlap
+ * second, so "checkout button" can find a button labelled "Proceed to
+ * payment". Without similarities it is keyword matching alone.
+ *
+ * Processing Time: <50ms (plus embedding time when similarities are used)
  */
 
 import { DomElement } from "./analyzer.js";
@@ -21,22 +25,50 @@ export interface GeneratedLocator {
   type: 'css' | 'xpath';
   confidence: number; // 0-1
   reason: string;
+  /** How the element was found; absent when nothing matched. */
+  matchedBy?: 'keyword' | 'semantic' | 'keyword+semantic';
+  /** Cosine similarity to the description, when semantic scores were given. */
+  similarity?: number;
 }
+
+/**
+ * Lowest similarity at which an element with no keyword in common still counts
+ * as a match. Measured with all-MiniLM-L6-v2: an unrelated description scored
+ * at most 0.08 against a page's elements, while true paraphrases scored from
+ * 0.26 ("add item to basket" → "Add to cart") up to 0.74.
+ */
+export const MIN_SEMANTIC_SIMILARITY = 0.2;
+
+/** Keyword score is capped and scaled to at most this much on top of similarity. */
+const KEYWORD_WEIGHT = 0.25;
+const KEYWORD_SCORE_CAP = 120;
+
+/** Generic control nouns left out of the keyword boost in semantic ranking. */
+const CONTROL_WORDS = new Set([
+  'button', 'btn', 'link', 'field', 'box', 'input', 'element', 'item', 'icon',
+]);
 
 export class LocatorGenerator {
   /**
    * Generate a stable locator from a natural language description
    * @param description Human description (e.g., "the submit button in the login form")
    * @param elements Array of DOM elements to search
+   * @param similarities Optional cosine similarity of the description to each
+   *   element, index-aligned with `elements`
    * @returns Best matching selector with confidence score
    */
   generateLocator(
     description: string,
-    elements: DomElement[]
+    elements: DomElement[],
+    similarities?: number[] | null
   ): GeneratedLocator {
     // Step 1: Extract keywords from description
     const keywords = this.extractKeywords(description);
     console.log(`[locator] Searching for: "${description}" → keywords: [${keywords.join(', ')}]`);
+
+    if (similarities && similarities.length === elements.length) {
+      return this.generateWithSimilarity(keywords, elements, similarities);
+    }
 
     if (keywords.length === 0) {
       return {
@@ -65,7 +97,61 @@ export class LocatorGenerator {
     console.log(`[locator] Best match: ${best.element.tag} (score: ${best.score})`);
 
     // Step 4: Generate and return selector
-    return this.generateSelector(best, keywords);
+    return { ...this.generateSelector(best, keywords), matchedBy: 'keyword' };
+  }
+
+  /**
+   * Rank by similarity, with keyword overlap as a bounded boost. An element
+   * qualifies if it shares a keyword or is similar enough on its own.
+   */
+  private generateWithSimilarity(
+    keywords: string[],
+    elements: DomElement[],
+    similarities: number[]
+  ): GeneratedLocator {
+    // Words naming the kind of control ("link", "button") say nothing about
+    // which one is meant, and match ids and classes all over a page
+    // ("dashboard-cart-link", "btn-primary"). The model already weighs them.
+    keywords = keywords.filter((kw) => !CONTROL_WORDS.has(kw));
+    let best: { element: DomElement; score: number; keyword: number; similarity: number } | null = null;
+
+    for (let i = 0; i < elements.length; i++) {
+      const element = elements[i];
+      const similarity = Number.isFinite(similarities[i]) ? similarities[i] : 0;
+      const keyword = keywords.length > 0 ? this.calculateScore(keywords, element) : 0;
+      if (keyword === 0 && !(similarity >= MIN_SEMANTIC_SIMILARITY)) continue;
+
+      const score =
+        similarity + (Math.min(keyword, KEYWORD_SCORE_CAP) / KEYWORD_SCORE_CAP) * KEYWORD_WEIGHT;
+      if (!best || score > best.score) {
+        best = { element, score, keyword, similarity };
+      }
+    }
+
+    if (!best) {
+      const top = similarities.length ? Math.max(...similarities) : 0;
+      return {
+        selector: '*',
+        type: 'css',
+        confidence: 0,
+        reason:
+          `No element shared a keyword or was similar enough ` +
+          `(best similarity ${top.toFixed(2)}, need ${MIN_SEMANTIC_SIMILARITY})`,
+        similarity: top,
+      };
+    }
+
+    const match = best;
+    console.log(
+      `[locator] Best match: ${match.element.tag} (similarity: ${match.similarity.toFixed(2)}, keyword score: ${match.keyword})`
+    );
+    const locator = this.generateSelector(match, keywords);
+    return {
+      ...locator,
+      reason: `${locator.reason}; similarity ${match.similarity.toFixed(2)} to the description`,
+      matchedBy: match.keyword > 0 ? 'keyword+semantic' : 'semantic',
+      similarity: match.similarity,
+    };
   }
 
   /**

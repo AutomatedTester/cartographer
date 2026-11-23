@@ -194,3 +194,76 @@ describe("analyzeCurrentPage batching", () => {
     );
   });
 });
+
+describe("analyzeCurrentPage semantic deduplication", () => {
+  // Non-form elements (role=button divs here) are merged when their
+  // embeddings say they are the same thing; buttons, links and inputs never are.
+  const roleButton = (id, text) =>
+    node("div", { id, text, attrs: { role: "button", tabindex: "0" } });
+
+  /** Unit vectors keyed by which label a description mentions. */
+  const byLabel = (text) => {
+    if (text.includes("Add to cart")) return [1, 0, 0];
+    if (text.includes("Add to bag")) return [0.99, 0.14, 0]; // cosine ~0.99
+    if (text.includes("Wishlist")) return [0, 1, 0];
+    return [0, 0, 1];
+  };
+
+  it("asks the model for one mean-pooled, normalised vector per description", async () => {
+    await analyze({
+      globals: { webnn: false },
+      body: [roleButton("a", "Add to cart"), roleButton("b", "Wishlist")],
+    });
+
+    const calls = stubState().embedCalls;
+    assert.ok(calls.length >= 2, "expected an embedding per candidate");
+    for (const call of calls) {
+      assert.deepEqual(call.options, { pooling: "mean", normalize: true });
+    }
+  });
+
+  it("merges non-form elements whose embeddings are near-identical", async () => {
+    const { result } = await analyze({
+      globals: { webnn: false },
+      stub: { embedding: byLabel },
+      body: [
+        roleButton("cart-1", "Add to cart"),
+        roleButton("cart-2", "Add to bag"),
+        roleButton("wish", "Wishlist"),
+      ],
+    });
+
+    const ids = result.highIntentElements.map((e) => e.id).sort();
+    assert.deepEqual(ids, ["cart-1", "wish"]);
+  });
+
+  it("keeps non-form elements whose embeddings differ", async () => {
+    const { result } = await analyze({
+      globals: { webnn: false },
+      stub: { embedding: byLabel },
+      body: [roleButton("cart", "Add to cart"), roleButton("wish", "Wishlist")],
+    });
+
+    assert.equal(result.highIntentElements.length, 2);
+  });
+
+  it("never merges real buttons, however similar", async () => {
+    const { result } = await analyze({
+      globals: { webnn: false },
+      stub: { embedding: [1, 0, 0] },
+      body: buildPage(4),
+    });
+
+    assert.equal(result.highIntentElements.filter((e) => e.tag === "button").length, 4);
+  });
+
+  it("keeps elements whose embedding came back empty", async () => {
+    const { result } = await analyze({
+      globals: { webnn: false },
+      stub: { embedding: [] },
+      body: [roleButton("a", "Add to cart"), roleButton("b", "Add to cart")],
+    });
+
+    assert.equal(result.highIntentElements.length, 2);
+  });
+});
