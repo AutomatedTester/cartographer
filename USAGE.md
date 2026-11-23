@@ -241,6 +241,8 @@ The result says which method found the element (`Matched by: semantic`, `keyword
 
 Set `WEBMCP_SEMANTIC_LOCATOR=off` in the server's environment to always use keyword matching alone.
 
+To use a fine-tuned model, set `WEBMCP_LOCATOR_MODEL` to its folder or Hugging Face id, and `WEBMCP_LOCATOR_MIN_SIMILARITY` to the threshold its evaluation recommends. [training/README.md](training/README.md) covers training, evaluating and storing one.
+
 #### Output Schema
 
 ```typescript

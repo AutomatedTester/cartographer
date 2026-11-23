@@ -223,3 +223,81 @@ describe("cosineSimilarity", () => {
     assert.equal(cosineSimilarity(undefined, [1]), 0);
   });
 });
+
+describe("resolveModelSource", () => {
+  it("defaults to the stock model", async () => {
+    const { resolveModelSource, MATCHER_MODEL } = await import("../../build/semantic-matcher.js");
+    assert.deepEqual(resolveModelSource(undefined), { model: MATCHER_MODEL });
+    assert.deepEqual(resolveModelSource("  "), { model: MATCHER_MODEL });
+  });
+
+  it("treats anything that is not a local directory as a Hub id", async () => {
+    const { resolveModelSource } = await import("../../build/semantic-matcher.js");
+    assert.deepEqual(resolveModelSource("your-org/locator-model"), { model: "your-org/locator-model" });
+  });
+
+  it("splits a local directory into the search path and folder name", async () => {
+    const { resolveModelSource } = await import("../../build/semantic-matcher.js");
+    const { mkdtempSync, mkdirSync } = await import("node:fs");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const root = mkdtempSync(path.join(os.tmpdir(), "locator-"));
+    const dir = path.join(root, "locator-model");
+    mkdirSync(dir);
+
+    assert.deepEqual(resolveModelSource(dir), {
+      model: "locator-model",
+      localModelPath: root + path.sep,
+    });
+  });
+
+  it("does not mistake a file for a model directory", async () => {
+    const { resolveModelSource } = await import("../../build/semantic-matcher.js");
+    const file = new URL(import.meta.url).pathname;
+    assert.deepEqual(resolveModelSource(file), { model: file });
+  });
+
+  it("names the model a matcher will load", async () => {
+    const { SemanticMatcher, MATCHER_MODEL } = await import("../../build/semantic-matcher.js");
+    assert.equal(new SemanticMatcher().modelName, MATCHER_MODEL);
+    assert.equal(new SemanticMatcher({ model: "org/model" }).modelName, "org/model");
+  });
+});
+
+describe("minSimilarityFromEnv", () => {
+  it("reads a number", async () => {
+    const { minSimilarityFromEnv, LOCATOR_MIN_SIMILARITY_ENV } = await import("../../build/semantic-matcher.js");
+    assert.equal(minSimilarityFromEnv({ [LOCATOR_MIN_SIMILARITY_ENV]: "0.16" }), 0.16);
+  });
+
+  it("is undefined when unset or blank", async () => {
+    const { minSimilarityFromEnv, LOCATOR_MIN_SIMILARITY_ENV } = await import("../../build/semantic-matcher.js");
+    assert.equal(minSimilarityFromEnv({}), undefined);
+    assert.equal(minSimilarityFromEnv({ [LOCATOR_MIN_SIMILARITY_ENV]: " " }), undefined);
+  });
+
+  it("ignores, and reports, a value that is not a number", async () => {
+    const { minSimilarityFromEnv, LOCATOR_MIN_SIMILARITY_ENV } = await import("../../build/semantic-matcher.js");
+    const messages = [];
+    const saved = console.error;
+    console.error = (m) => messages.push(m);
+    try {
+      assert.equal(minSimilarityFromEnv({ [LOCATOR_MIN_SIMILARITY_ENV]: "high" }), undefined);
+    } finally {
+      console.error = saved;
+    }
+    assert.match(messages.join("\n"), /not a number/);
+  });
+
+  it("reads process.env by default", async () => {
+    const { minSimilarityFromEnv, LOCATOR_MIN_SIMILARITY_ENV } = await import("../../build/semantic-matcher.js");
+    const saved = process.env[LOCATOR_MIN_SIMILARITY_ENV];
+    process.env[LOCATOR_MIN_SIMILARITY_ENV] = "0.3";
+    try {
+      assert.equal(minSimilarityFromEnv(), 0.3);
+    } finally {
+      if (saved === undefined) delete process.env[LOCATOR_MIN_SIMILARITY_ENV];
+      else process.env[LOCATOR_MIN_SIMILARITY_ENV] = saved;
+    }
+  });
+});

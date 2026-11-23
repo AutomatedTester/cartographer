@@ -31,7 +31,7 @@ import { SessionManager } from "./session-manager.js";
 import { WorkflowDetector } from "./workflow-detector.js";
 import { LocatorGenerator } from "./locator-generator.js";
 import { BrowserAnalysisPipeline } from "./browser-pipeline.js";
-import { SemanticMatcher } from "./semantic-matcher.js";
+import { SemanticMatcher, LOCATOR_MODEL_ENV, minSimilarityFromEnv } from "./semantic-matcher.js";
 
 // ---------------------------------------------------------------------------
 // Helper Functions
@@ -62,8 +62,17 @@ const browserPipeline = new BrowserAnalysisPipeline();
 /**
  * Embedding model for get_element_locator, loaded on first use. Null when
  * turned off with WEBMCP_SEMANTIC_LOCATOR=off, which leaves keyword matching.
+ * WEBMCP_LOCATOR_MODEL picks another model, such as a fine-tuned one.
  */
-const semanticMatcher = SemanticMatcher.disabledByEnv() ? null : new SemanticMatcher();
+const semanticMatcher = SemanticMatcher.disabledByEnv()
+  ? null
+  : new SemanticMatcher({ model: process.env[LOCATOR_MODEL_ENV] });
+
+/**
+ * Minimum similarity for a semantic-only locator match. Unset keeps the
+ * default calibrated for the stock model; set it for a fine-tuned model.
+ */
+const locatorMinSimilarity = minSimilarityFromEnv();
 
 /** Most-recent analysis result, used by get_element_locator. */
 let lastAnalysis: AnalysisResult | null = null;
@@ -484,7 +493,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const similarities = semanticMatcher
       ? await semanticMatcher.similarities(description, allElements)
       : null;
-    const locatorGen = new LocatorGenerator();
+    const locatorGen = new LocatorGenerator({ minSimilarity: locatorMinSimilarity });
     const locator = locatorGen.generateLocator(description, allElements, similarities);
 
     const matchedBy = locator.matchedBy ?? "none";

@@ -1,0 +1,10 @@
+# Python side of the locator fine-tuning pipeline (train.py, export.py).
+# transformers comes in with sentence-transformers.
+# For CPU-only PyTorch, install it first:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch>=2.2
+sentence-transformers>=3.0
+accelerate>=1.1
+datasets>=2.18
+onnxruntime>=1.17
+onnx>=1.16

@@ -4,3 +4,5 @@ build/
 mempalace.yaml
 entities.json
 .claude/
+training/out/
+__pycache__/
