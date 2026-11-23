@@ -16,8 +16,13 @@ export function configureStub(options = {}) {
     failDevices: options.failDevices ?? [],
     /** Milliseconds each pipeline() call takes to resolve. */
     loadDelayMs: options.loadDelayMs ?? 0,
-    /** Embedding returned by the extractor. */
+    /**
+     * Embedding returned by the extractor: an array used for every input, or
+     * a function from the input text to an array.
+     */
     embedding: options.embedding ?? [0.1, 0.2, 0.3],
+    /** Every extractor invocation: { text, options }. */
+    embedCalls: [],
   };
   return globalThis.__transformersStub;
 }
@@ -40,10 +45,12 @@ export async function pipeline(task, model, options = {}) {
     throw new Error(`stub: device '${options.device}' unavailable`);
   }
 
-  const extractor = async () => ({
-    data: Float32Array.from(state.embedding),
-    dims: [1, state.embedding.length],
-  });
+  const extractor = async (text, callOptions = {}) => {
+    state.embedCalls.push({ text, options: callOptions });
+    const vector =
+      typeof state.embedding === "function" ? state.embedding(text) : state.embedding;
+    return { data: Float32Array.from(vector), dims: [1, vector.length] };
+  };
   extractor.__stubDevice = options.device;
   return extractor;
 }

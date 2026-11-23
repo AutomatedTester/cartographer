@@ -228,6 +228,19 @@ interface GetElementLocatorInput {
 }
 ```
 
+#### How matching works
+
+Each element from the last crawl is scored two ways:
+
+- **Meaning**: the description and a short phrase for each element (for example `button, text: Proceed to payment`) are embedded with a local sentence model, `Xenova/all-MiniLM-L6-v2` (about 23 MB quantised). The model downloads from Hugging Face on first use and is cached; the server starts loading it after each crawl so the first lookup doesn't wait.
+- **Shared words**: keywords from the description matched against the element's text, label, id, classes and placeholder. Generic words such as "button" or "link" don't count here, because they match ids and classes all over a page.
+
+Elements are ranked by meaning, with shared words as a bounded tie-breaker. An element with no word in common counts as a match only if its similarity is at least 0.2. Unrelated descriptions measured below 0.1 against a real page, and true paraphrases from 0.26 up.
+
+The result says which method found the element (`Matched by: semantic`, `keyword+semantic` or `keyword`). If the model can't be loaded (offline, say) or isn't ready within 15 seconds, the lookup uses keyword matching alone and says so (`keyword only`).
+
+Set `WEBMCP_SEMANTIC_LOCATOR=off` in the server's environment to always use keyword matching alone.
+
 #### Output Schema
 
 ```typescript

@@ -31,6 +31,7 @@ import { SessionManager } from "./session-manager.js";
 import { WorkflowDetector } from "./workflow-detector.js";
 import { LocatorGenerator } from "./locator-generator.js";
 import { BrowserAnalysisPipeline } from "./browser-pipeline.js";
+import { SemanticMatcher } from "./semantic-matcher.js";
 
 // ---------------------------------------------------------------------------
 // Helper Functions
@@ -57,6 +58,12 @@ const crawler = new SiteCrawler();
 
 /** Browser-based analysis pipeline for Phase 2 optimization */
 const browserPipeline = new BrowserAnalysisPipeline();
+
+/**
+ * Embedding model for get_element_locator, loaded on first use. Null when
+ * turned off with WEBMCP_SEMANTIC_LOCATOR=off, which leaves keyword matching.
+ */
+const semanticMatcher = SemanticMatcher.disabledByEnv() ? null : new SemanticMatcher();
 
 /** Most-recent analysis result, used by get_element_locator. */
 let lastAnalysis: AnalysisResult | null = null;
@@ -388,6 +395,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     try {
       await crawler.init();
       lastAnalysis = await crawler.crawlAndAnalyze(url, 25, { ariaAudit });
+      // Load the locator model now, so the first lookup does not wait for it.
+      semanticMatcher?.warmUp();
     } finally {
       await crawler.close();
     }
@@ -469,17 +478,25 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    // PHASE 1 OPTIMIZATION: Use heuristic-based locator generation (no Copilot!)
-    // Convert DomElements to the format needed by LocatorGenerator
+    // Rank by meaning when the embedding model is available, otherwise by
+    // keyword overlap alone. Both run locally; no LLM call.
     const allElements = lastAnalysis.highIntentElements ?? [];
+    const similarities = semanticMatcher
+      ? await semanticMatcher.similarities(description, allElements)
+      : null;
     const locatorGen = new LocatorGenerator();
-    const locator = locatorGen.generateLocator(description, allElements);
+    const locator = locatorGen.generateLocator(description, allElements, similarities);
 
+    const matchedBy = locator.matchedBy ?? "none";
+    const mode = similarities ? "semantic + keyword" : "keyword only";
     return {
       content: [
         {
           type: "text" as const,
-          text: `Locator: ${locator.selector}\nType: ${locator.type}\nConfidence: ${(locator.confidence * 100).toFixed(0)}%\nReason: ${locator.reason}`,
+          text:
+            `Locator: ${locator.selector}\nType: ${locator.type}\n` +
+            `Confidence: ${(locator.confidence * 100).toFixed(0)}%\nReason: ${locator.reason}\n` +
+            `Matched by: ${matchedBy} (${mode})`,
         },
       ],
     };
@@ -754,55 +771,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     isError: true,
   };
 });
-
-// ---------------------------------------------------------------------------
-// Utility: pick the best matching test candidate for a description
-// ---------------------------------------------------------------------------
-
-/**
- * Simple keyword-overlap heuristic to match a natural-language description
- * to a high-intent element without requiring an extra model call.
- */
-function findBestCandidate(
-  candidates: HighIntentElement[],
-  description: string
-): HighIntentElement | null {
-  if (candidates.length === 0) return null;
-
-  const queryTokens = tokenize(description);
-
-  let bestScore = -1;
-  let best: HighIntentElement | null = null;
-
-  for (const candidate of candidates) {
-    // Build a searchable string from element attributes
-    const candidateText = [
-      candidate.tag,
-      candidate.id,
-      candidate.classes?.join(" "),
-      candidate.ariaLabel,
-      candidate.text,
-      candidate.role,
-      candidate.intentReasons?.join(" "),
-    ]
-      .filter(Boolean)
-      .join(" ");
-    const candidateTokens = tokenize(candidateText);
-    const overlap = queryTokens.filter((t) => candidateTokens.includes(t))
-      .length;
-    const score = overlap / (queryTokens.length + 1);
-    if (score > bestScore) {
-      bestScore = score;
-      best = candidate;
-    }
-  }
-
-  return best;
-}
-
-function tokenize(text: string): string[] {
-  return text.toLowerCase().split(/\W+/).filter(Boolean);
-}
 
 function formatTestResultsMarkdown(summary: TestExecutionSummary): string {
   const { url, totalTests, passedTests, failedTests, results, totalDuration } = summary;

@@ -4,9 +4,15 @@ import { TestCaseGenerator } from "./test-case-generator.js";
 import { EmbeddingCache } from "./embedding-cache.js";
 import { HeuristicScorer } from "./heuristic-scorer.js";
 
+/** Sentence-embedding model used unless the device is short on resources. */
+export const DEFAULT_MODEL = 'Xenova/all-MiniLM-L6-v2';
+/** Smaller sentence-embedding model for low-memory or slow-network devices. */
+export const LIGHTWEIGHT_MODEL = 'Xenova/paraphrase-MiniLM-L3-v2';
+
 // ---------------------------------------------------------------------------
 // DOM types (defined here — this module is browser-only)
 // ---------------------------------------------------------------------------
+
 
 export interface DomElement {
   tag: string;
@@ -45,6 +51,8 @@ export class DomAnalyzer {
   private static modelLoadPromise: Promise<void> | null = null;
   private static globalDevice: 'webnn' | 'webgpu' | 'wasm' | 'none' = 'none';
   private static globalModelLoadTime: number = 0;
+  /** Model id the cached pipeline was loaded with; part of the embedding cache key. */
+  private static globalModelName: string = '';
 
   private async withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
     return await Promise.race([
@@ -173,6 +181,7 @@ export class DomAnalyzer {
     // PHASE 1 OPTIMIZATION: Device-aware model selection
     // Select lightweight model on low-resource devices
     const selectedModel = await this.selectModel();
+    DomAnalyzer.globalModelName = selectedModel;
     console.log(`[analyzer] Selected model: ${selectedModel}`);
 
     // Try devices in order of preference, skip WebNN if not supported
@@ -217,9 +226,19 @@ export class DomAnalyzer {
   }
 
   /**
-   * PHASE 1 OPTIMIZATION: Select model based on device capabilities
-   * Low-memory devices get DistilBERT (28MB, 5x faster)
-   * High-memory devices get all-MiniLM (134MB, more accurate)
+   * PHASE 1 OPTIMIZATION: Select model based on device capabilities.
+   *
+   * Both choices are sentence-embedding models: they are trained so that the
+   * cosine similarity of two (mean-pooled) outputs means "these say the same
+   * thing", which is what deduplication and matching rely on. A plain BERT
+   * checkpoint does not have that property. The previous lightweight choice,
+   * Xenova/distilbert-base-multilingual-cased, also does not exist on the
+   * Hugging Face Hub, so on most devices the model never loaded and the
+   * analyzer silently fell back to heuristics.
+   *
+   * Low-resource devices get paraphrase-MiniLM-L3-v2 (3 layers, ~17MB
+   * quantised); everything else gets all-MiniLM-L6-v2 (6 layers, ~23MB
+   * quantised), which ranks matches noticeably better.
    */
   private async selectModel(): Promise<string> {
     const memory = (navigator as any).deviceMemory || 4; // GB
@@ -229,27 +248,38 @@ export class DomAnalyzer {
       `[analyzer] Device: ${memory}GB RAM, ${connection} connection`
     );
 
-    // Low resource devices: use DistilBERT
-    if (memory < 4 || connection === '3g' || connection === '2g') {
-      console.log(
-        '[analyzer] Low-resource device detected, using DistilBERT (lightweight)'
-      );
-      return 'Xenova/distilbert-base-multilingual-cased';
+    if (memory < 4 || connection === 'slow-2g' || connection === '2g' || connection === '3g') {
+      console.log('[analyzer] Low-resource device detected, using paraphrase-MiniLM-L3-v2 (lightweight)');
+      return LIGHTWEIGHT_MODEL;
     }
 
-    // High resource devices: use all-MiniLM
-    if (memory >= 8 && connection === '4g') {
-      console.log(
-        '[analyzer] High-resource device detected, using all-MiniLM (accurate)'
-      );
-      return 'Xenova/all-MiniLM-L6-v2';
-    }
+    console.log('[analyzer] Using all-MiniLM-L6-v2 (accurate)');
+    return DEFAULT_MODEL;
+  }
 
-    // Medium resource: default to DistilBERT (safe choice)
-    console.log(
-      '[analyzer] Medium-resource device, using DistilBERT as safe default'
-    );
-    return 'Xenova/distilbert-base-multilingual-cased';
+  /**
+   * One sentence embedding for `desc`, from the cache when possible.
+   *
+   * The pipeline must be asked for mean pooling: without it the output is one
+   * vector per token, flattened, so two descriptions of different lengths gave
+   * arrays of different lengths and their cosine similarity came out NaN —
+   * which is why deduplication never merged anything.
+   *
+   * The cache key carries the model id, so an embedding from one model is
+   * never compared against one from another.
+   */
+  private async embed(desc: string): Promise<number[] | null> {
+    const key = `${DomAnalyzer.globalModelName}|${desc}`;
+    const cached = await this.cache?.getEmbedding(key);
+    if (cached) return cached;
+
+    const result = await this.extractor!(desc, { pooling: 'mean', normalize: true });
+    const data = (result as any)?.data;
+    if (!data || data.length === 0) return null;
+
+    const embedding = Array.from(data as ArrayLike<number>);
+    await this.cache?.setEmbedding(key, embedding);
+    return embedding;
   }
 
   /**
@@ -261,6 +291,7 @@ export class DomAnalyzer {
     DomAnalyzer.modelLoadPromise = null;
     DomAnalyzer.globalDevice = 'none';
     DomAnalyzer.globalModelLoadTime = 0;
+    DomAnalyzer.globalModelName = '';
     console.log('[analyzer] Model cache cleared');
   }
 
@@ -291,8 +322,7 @@ export class DomAnalyzer {
     } else {
       // Use ML model to deduplicate by semantic similarity
       const descriptions = highIntentElements.map((el) => elementDescription(el));
-
-      const embeddings: number[][] = [];
+      const embeddings: (number[] | null)[] = [];
 
       // PHASE 2 OPTIMIZATION: GPU memory management with batching
       // For large DOMs (100+ elements), process in batches to prevent OOM
@@ -300,61 +330,10 @@ export class DomAnalyzer {
         console.log(
           `[analyzer] Processing ${descriptions.length} embeddings in batches of ${maxBatchSize}`
         );
-        for (let i = 0; i < descriptions.length; i += maxBatchSize) {
-          const batch = descriptions.slice(i, i + maxBatchSize);
-          const batchResults = await Promise.all(
-            batch.map(async (desc) => {
-              // PHASE 1 OPTIMIZATION: Check embedding cache first
-              let embedding = await this.cache?.getEmbedding(desc);
-              if (!embedding) {
-                const result = await this.extractor!(desc);
-                if (result) {
-                  // Convert Tensor to number array
-                  const tensorData = (result as any).data ? Array.from((result as any).data) : Array.from(result as any);
-                  embedding = Array.isArray(tensorData[0]) ? tensorData[0] : tensorData;
-                  // Cache the computed embedding
-                  if (embedding) {
-                    await this.cache?.setEmbedding(desc, embedding);
-                  }
-                  return embedding;
-                }
-              }
-              return embedding;
-            })
-          );
-          batchResults.forEach(result => {
-            if (result) {
-              embeddings.push(result);
-            }
-          });
-        }
-      } else {
-        // Original parallel processing for smaller DOMs
-        const embeddingResults = await Promise.all(
-          descriptions.map(async (desc) => {
-            // PHASE 1 OPTIMIZATION: Check embedding cache first
-            let embedding = await this.cache?.getEmbedding(desc);
-            if (!embedding) {
-              const result = await this.extractor!(desc);
-              if (result) {
-                // Convert Tensor to number array
-                const tensorData = (result as any).data ? Array.from((result as any).data) : Array.from(result as any);
-                embedding = Array.isArray(tensorData[0]) ? tensorData[0] : tensorData;
-                // Cache the computed embedding
-                if (embedding) {
-                  await this.cache?.setEmbedding(desc, embedding);
-                }
-                return embedding;
-              }
-            }
-            return embedding;
-          })
-        );
-        embeddingResults.forEach(result => {
-          if (result) {
-            embeddings.push(Array.isArray(result[0]) ? result[0][0] : (result[0] as any));
-          }
-        });
+      }
+      for (let i = 0; i < descriptions.length; i += maxBatchSize) {
+        const batch = descriptions.slice(i, i + maxBatchSize);
+        embeddings.push(...(await Promise.all(batch.map((desc) => this.embed(desc)))));
       }
 
       const used = new Array(highIntentElements.length).fill(false);
@@ -383,7 +362,9 @@ export class DomAnalyzer {
           // Skip dedup for target if it's also a critical tag type
           if (NON_DEDUP_TAGS.has(highIntentElements[j].tag)) continue;
           
-          if (cosineSimilarity(embeddings[i], embeddings[j]) > threshold) {
+          const a = embeddings[i];
+          const b = embeddings[j];
+          if (a && b && cosineSimilarity(a, b) > threshold) {
             used[j] = true;
           }
         }
