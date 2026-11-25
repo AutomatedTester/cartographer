@@ -122,3 +122,30 @@ describe("LocatorGenerator with semantic similarities", () => {
     assert.equal(locate("home", page, null).matchedBy, "keyword");
   });
 });
+
+describe("LocatorGenerator minSimilarity option", () => {
+  const page = [
+    dom({ id: "pay", text: "Proceed to payment" }),
+    dom({ id: "home", text: "Home" }),
+  ];
+  const locateWith = (options, similarities) =>
+    muted(() => new LocatorGenerator(options).generateLocator("checkout", page, similarities));
+
+  it("accepts a match the default threshold would reject", () => {
+    assert.equal(locateWith({}, [0.17, 0]).confidence, 0);
+    assert.equal(locateWith({ minSimilarity: 0.15 }, [0.17, 0]).selector, "#pay");
+  });
+
+  it("rejects a match the default threshold would accept", () => {
+    assert.equal(locateWith({}, [0.3, 0]).selector, "#pay");
+    const result = locateWith({ minSimilarity: 0.4 }, [0.3, 0]);
+    assert.equal(result.confidence, 0);
+    assert.match(result.reason, /need 0\.4/);
+  });
+
+  it("falls back to the default for a missing or non-numeric value", () => {
+    for (const minSimilarity of [undefined, Number.NaN, "0.1"]) {
+      assert.equal(locateWith({ minSimilarity }, [MIN_SEMANTIC_SIMILARITY - 0.01, 0]).confidence, 0);
+    }
+  });
+});

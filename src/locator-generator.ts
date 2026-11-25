@@ -48,7 +48,23 @@ const CONTROL_WORDS = new Set([
   'button', 'btn', 'link', 'field', 'box', 'input', 'element', 'item', 'icon',
 ]);
 
+export interface LocatorGeneratorOptions {
+  /**
+   * Overrides MIN_SEMANTIC_SIMILARITY. A fine-tuned model scores on its own
+   * scale; training/evaluate.mjs recommends a value for it.
+   */
+  minSimilarity?: number;
+}
+
 export class LocatorGenerator {
+  private readonly minSimilarity: number;
+
+  constructor(options: LocatorGeneratorOptions = {}) {
+    const value = options.minSimilarity;
+    this.minSimilarity =
+      typeof value === 'number' && Number.isFinite(value) ? value : MIN_SEMANTIC_SIMILARITY;
+  }
+
   /**
    * Generate a stable locator from a natural language description
    * @param description Human description (e.g., "the submit button in the login form")
@@ -119,7 +135,7 @@ export class LocatorGenerator {
       const element = elements[i];
       const similarity = Number.isFinite(similarities[i]) ? similarities[i] : 0;
       const keyword = keywords.length > 0 ? this.calculateScore(keywords, element) : 0;
-      if (keyword === 0 && !(similarity >= MIN_SEMANTIC_SIMILARITY)) continue;
+      if (keyword === 0 && !(similarity >= this.minSimilarity)) continue;
 
       const score =
         similarity + (Math.min(keyword, KEYWORD_SCORE_CAP) / KEYWORD_SCORE_CAP) * KEYWORD_WEIGHT;
@@ -136,7 +152,7 @@ export class LocatorGenerator {
         confidence: 0,
         reason:
           `No element shared a keyword or was similar enough ` +
-          `(best similarity ${top.toFixed(2)}, need ${MIN_SEMANTIC_SIMILARITY})`,
+          `(best similarity ${top.toFixed(2)}, need ${this.minSimilarity})`,
         similarity: top,
       };
     }

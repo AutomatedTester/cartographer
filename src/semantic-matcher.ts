@@ -12,6 +12,9 @@
  * unavailable so callers can fall back to keyword matching.
  */
 
+import { existsSync, statSync } from "node:fs";
+import path from "node:path";
+
 import type { DomElement } from "./analyzer.js";
 
 /** Turns texts into one embedding each. */
@@ -23,6 +26,54 @@ export const MATCHER_MODEL = "Xenova/all-MiniLM-L6-v2";
 /** Environment variable that turns semantic matching off ("off", "0", "false"). */
 export const SEMANTIC_LOCATOR_ENV = "WEBMCP_SEMANTIC_LOCATOR";
 
+/**
+ * Environment variable naming the model to use instead of MATCHER_MODEL:
+ * a Hugging Face model id ("your-org/locator-model"; set HF_TOKEN for a
+ * private one) or a local directory in Transformers.js layout, such as the
+ * output of training/export.py.
+ */
+export const LOCATOR_MODEL_ENV = "WEBMCP_LOCATOR_MODEL";
+
+/**
+ * Environment variable overriding the minimum similarity for a semantic-only
+ * locator match. A fine-tuned model scores on its own scale; set this to the
+ * value training/evaluate.mjs recommends for it.
+ */
+export const LOCATOR_MIN_SIMILARITY_ENV = "WEBMCP_LOCATOR_MIN_SIMILARITY";
+
+/** The configured minimum similarity, or undefined to keep the default. */
+export function minSimilarityFromEnv(env: NodeJS.ProcessEnv = process.env): number | undefined {
+  const value = env[LOCATOR_MIN_SIMILARITY_ENV]?.trim();
+  if (!value) return undefined;
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    console.error(`[semantic-matcher] Ignoring ${LOCATOR_MIN_SIMILARITY_ENV}=${value}: not a number`);
+    return undefined;
+  }
+  return n;
+}
+
+/**
+ * Where a model setting points: a Hub id, or a local directory split into the
+ * parent folder Transformers.js searches and the folder name it loads.
+ */
+export interface ModelSource {
+  model: string;
+  localModelPath?: string;
+}
+
+/** Interpret a model setting; an existing directory wins over a Hub id. */
+export function resolveModelSource(value: string | undefined): ModelSource {
+  const setting = value?.trim();
+  if (!setting) return { model: MATCHER_MODEL };
+
+  const dir = path.resolve(setting);
+  if (existsSync(dir) && statSync(dir).isDirectory()) {
+    return { model: path.basename(dir), localModelPath: path.dirname(dir) + path.sep };
+  }
+  return { model: setting };
+}
+
 /** After a failed load, wait this long before trying again. */
 const RETRY_AFTER_MS = 5 * 60 * 1000;
 
@@ -32,7 +83,7 @@ export interface SemanticMatcherOptions {
    * Tests pass their own.
    */
   loadEmbedder?: () => Promise<Embedder>;
-  /** Hugging Face model id for the default loader. */
+  /** Hub id or local directory for the default loader (see LOCATOR_MODEL_ENV). */
   model?: string;
   /** Longest a request waits for the model to load before falling back. */
   loadTimeoutMs?: number;
@@ -41,6 +92,8 @@ export interface SemanticMatcherOptions {
 }
 
 export class SemanticMatcher {
+  /** The model this matcher loads: a Hub id or a local directory. */
+  readonly modelName: string;
   private readonly loadEmbedder: () => Promise<Embedder>;
   private readonly loadTimeoutMs: number;
   private readonly now: () => number;
@@ -52,8 +105,9 @@ export class SemanticMatcher {
   private readonly cache = new Map<string, number[]>();
 
   constructor(options: SemanticMatcherOptions = {}) {
-    const model = options.model ?? MATCHER_MODEL;
-    this.loadEmbedder = options.loadEmbedder ?? (() => loadTransformersEmbedder(model));
+    const source = resolveModelSource(options.model);
+    this.modelName = source.localModelPath ? path.join(source.localModelPath, source.model) : source.model;
+    this.loadEmbedder = options.loadEmbedder ?? (() => loadTransformersEmbedder(source));
     this.loadTimeoutMs = options.loadTimeoutMs ?? 15000;
     this.now = options.now ?? Date.now;
   }
@@ -189,10 +243,17 @@ export function cosineSimilarity(a: number[], b: number[]): number {
 
 // Downloads a real model, so unit tests inject an embedder instead.
 /* node:coverage disable */
-async function loadTransformersEmbedder(model: string): Promise<Embedder> {
-  const { pipeline } = await import("@huggingface/transformers");
-  // q8 is the ~23MB quantised build; plenty for ranking a page's elements.
-  const extractor = await (pipeline as any)("feature-extraction", model, { dtype: "q8" });
+export async function loadTransformersEmbedder(source: ModelSource): Promise<Embedder> {
+  const { pipeline, env } = await import("@huggingface/transformers");
+  if (source.localModelPath) {
+    // A local model must not silently fall back to a same-named Hub repo.
+    env.localModelPath = source.localModelPath;
+    env.allowLocalModels = true;
+    env.allowRemoteModels = false;
+  }
+  // q8 is the ~23MB quantised build (onnx/model_quantized.onnx); plenty for
+  // ranking a page's elements.
+  const extractor = await (pipeline as any)("feature-extraction", source.model, { dtype: "q8" });
   return async (texts: string[]) => {
     const output = await extractor(texts, { pooling: "mean", normalize: true });
     return output.tolist() as number[][];
