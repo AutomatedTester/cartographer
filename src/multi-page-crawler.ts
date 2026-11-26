@@ -613,9 +613,9 @@ export class MultiPageCrawler {
                 return `${base.protocol}//${base.host}${target}`;
             }
 
-            // Handle relative URLs
-            const basePath = baseUrl.endsWith('/') ? baseUrl : baseUrl + '/';
-            const resolved = new URL(target, basePath).href;
+            // Handle relative URLs the way a browser does: against the page's
+            // own URL, so "b.html" on /demo/index.html is /demo/b.html.
+            const resolved = new URL(target, baseUrl).href;
 
             // Remove fragments and normalize
             return resolved.split('#')[0];
