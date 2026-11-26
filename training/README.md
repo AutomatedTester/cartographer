@@ -38,7 +38,8 @@ data/eval.jsonl  ─────────────────────
 
 | Step | What it does |
 |---|---|
-| `prepare.mjs` | Checks both datasets (unknown keys, look-alike elements, evaluation descriptions leaking into training) and writes training rows. Element text comes from the server's own `describeElement`, so the model trains on exactly the strings it compares at run time. |
+| `harvest.mjs` | Optional. Crawls real sites and drafts pages for the datasets: the elements the locator would rank there, with queries left for you to write. |
+| `prepare.mjs` | Checks both datasets (unknown keys, look-alike elements, evaluation descriptions or sites leaking into training) and writes training rows. Element text comes from the server's own `describeElement`, so the model trains on exactly the strings it compares at run time. |
 | `train.py` | Fine-tunes `sentence-transformers/all-MiniLM-L6-v2`. Each description must score its element above every other element on the same page, and above the rest of the batch. |
 | `export.py` | Writes ONNX in the layout Transformers.js loads, with an 8-bit copy. Fails if the export doesn't reproduce the PyTorch output, or if the 8-bit copy drifts from full precision. |
 | `evaluate.mjs` | Compares keyword matching, the stock model and any models you name on the held-out set, through the same code the server uses, and recommends a similarity threshold. |
@@ -141,13 +142,50 @@ Both files are JSON Lines, one page per line:
   nothing, used to set the threshold.
 
 `prepare.mjs` refuses data that would mislead: two elements that look identical
-to the model, a query pointing at an unknown key, or a training description
-that is also in the evaluation set. The unit tests run the same checks on the
+to the model, a query pointing at an unknown key, a training description
+that is also in the evaluation set, or a `site` that appears in both files. The unit tests run the same checks on the
 bundled files.
 
 The most valuable additions are real `get_element_locator` calls that went
 wrong, with the element that was meant. Add them to `train.jsonl`, and keep a
 separate set from other sites in `eval.jsonl` so the score stays honest.
+
+### Harvesting pages from real sites
+
+Writing elements by hand is the slow part, and hand-written pages are tidier
+than real ones. `harvest.mjs` crawls a site with the server's own crawler and
+writes what it finds in the dataset format:
+
+```bash
+npm run train:harvest -- --url https://the-internet.herokuapp.com/ --max-pages 10 --save-raw
+# → training/out/harvest/the-internet.herokuapp.com.jsonl  (one draft page per line)
+#   training/out/harvest/the-internet.herokuapp.com.crawl.json  (with --save-raw)
+
+npm run train:harvest -- --from training/out/harvest/the-internet.herokuapp.com.crawl.json
+# rebuild drafts from a saved crawl without crawling again
+```
+
+Each draft page keeps the crawl's high-intent elements (the same set
+`get_element_locator` ranks), trimmed to the fields the model reads, with
+repeats (the same link in header and footer) and label-less elements dropped.
+It also carries `site` and `url`. Its `queries` are empty, and `prepare.mjs`
+rejects a page with no queries, so an unfinished draft can't slip in.
+
+Then:
+
+1. **Write queries** for the elements worth asking about: several phrasings
+   each, in the words a tester would use. An LLM can draft them, but read
+   every one; a wrong label teaches the wrong thing. Leave the other elements
+   in as wrong answers.
+2. **Delete pages** that add nothing (a site's tenth near-identical article page).
+3. **Pick a side per site.** Append the whole file to `train.jsonl` *or*
+   `eval.jsonl`. Put two or three sites in evaluation only, so the score
+   measures how the model does on sites it has never seen. `prepare.mjs`
+   checks the `site` field to enforce this.
+
+Crawl sites built for test practice, or your own, rather than production
+sites you don't run. The harvester never fills in login forms; it records
+only what a logged-out visitor sees.
 
 ## Scope
 

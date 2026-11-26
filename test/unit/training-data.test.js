@@ -11,10 +11,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  crawlToPages,
   loadPages,
   pageElements,
   queryTexts,
   recommendThreshold,
+  sharedSites,
   toTriplets,
   validatePages,
 } from "../../training/lib.mjs";
@@ -45,6 +47,10 @@ describe("bundled datasets", () => {
 
   it("the training set is valid and shares no query with the evaluation set", () => {
     assert.deepEqual(validatePages(train, { heldOut: queryTexts(evalSet) }), []);
+  });
+
+  it("no site is in both datasets", () => {
+    assert.deepEqual(sharedSites(train, evalSet), []);
   });
 
   it("the evaluation set has unrelated descriptions to test false matches", () => {
@@ -153,5 +159,82 @@ describe("loadPages", () => {
 
     writeFileSync(file, `// comment\n\n${JSON.stringify(page())}\n`);
     assert.equal(loadPages(file).length, 1);
+  });
+});
+
+describe("sharedSites", () => {
+  it("names sites present on both sides and ignores pages without a site", () => {
+    const train = [page({ site: "a.test" }), page({ site: "b.test" }), page()];
+    const evalSet = [page({ site: "b.test" }), page()];
+    assert.deepEqual(sharedSites(train, evalSet), ["b.test"]);
+    assert.deepEqual(sharedSites(train, [page({ site: "c.test" })]), []);
+  });
+});
+
+describe("crawlToPages", () => {
+  const crawled = (url, highIntentElements) => ({ url, title: "t", highIntentElements, consoleLogs: [] });
+  const login = crawled("https://shop.test/login?next=%2F", [
+    {
+      tag: "BUTTON",
+      text: "  Sign\n   in ",
+      id: "login-btn",
+      classes: ["btn"],
+      locator: "#login-btn",
+      intentScore: 80,
+      intentReasons: ["submit"],
+      attributes: { type: "submit", class: "btn", onclick: "go()" },
+    },
+    { tag: "a", text: "Create an account", attributes: { href: "/register" } },
+    { tag: "a", text: "Create an account", attributes: { href: "/register" } }, // footer repeat
+    { tag: "input", attributes: { type: "password" } }, // typed input: kept
+    { tag: "div", attributes: { class: "overlay" } }, // nothing to match: dropped
+    { tag: "p", text: "x".repeat(300) },
+  ]);
+
+  it("keeps the fields the model reads, drops repeats and blanks, and leaves queries empty", () => {
+    const [draft] = crawlToPages({ session: { pages: [login] } });
+
+    assert.equal(draft.page, "shop-test-login");
+    assert.equal(draft.site, "shop.test");
+    assert.equal(draft.url, "https://shop.test/login?next=%2F");
+    assert.deepEqual(draft.queries, []);
+    assert.deepEqual(draft.elements[0], {
+      key: "login-btn",
+      tag: "button",
+      text: "Sign in",
+      id: "login-btn",
+      attributes: { type: "submit" },
+    });
+    assert.deepEqual(
+      draft.elements.map((e) => e.key),
+      ["login-btn", "create-an-account", "password-input", draft.elements[3].key]
+    );
+    assert.ok(draft.elements[3].text.length <= 120 && draft.elements[3].text.endsWith("…"));
+  });
+
+  it("produces pages that pass validation once queries are added", () => {
+    const [draft] = crawlToPages([login]);
+    draft.queries = [["log in", "login-btn"]];
+    assert.deepEqual(validatePages([draft]), []);
+  });
+
+  it("names pages uniquely, takes a site override, and skips pages with under two usable elements", () => {
+    const home = crawled("https://shop.test/", [
+      { tag: "a", text: "Cart" },
+      { tag: "a", text: "Help" },
+    ]);
+    const homeAgain = crawled("https://shop.test/", [
+      { tag: "a", text: "Cart" },
+      { tag: "a", text: "About" },
+    ]);
+    const thin = crawled("https://shop.test/empty", [{ tag: "a", text: "Only" }]);
+
+    const drafts = crawlToPages([home, homeAgain, thin, { url: "https://x.test/" }], { site: "shop" });
+    assert.deepEqual(drafts.map((p) => p.page), ["shop-home", "shop-home-2"]);
+    assert.ok(drafts.every((p) => p.site === "shop"));
+  });
+
+  it("accepts a single crawl_and_analyze result", () => {
+    assert.equal(crawlToPages(login).length, 1);
   });
 });

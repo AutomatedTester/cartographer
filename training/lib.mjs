@@ -155,6 +155,109 @@ export function recommendThreshold(maxUnrelatedSimilarity, margin = 0.03) {
   return Math.round((maxUnrelatedSimilarity + margin) * 100) / 100;
 }
 
+/**
+ * Sites (the pages' `site` field) that appear in both datasets. Evaluating on
+ * a site the model trained on measures memory of that site, not whether it
+ * copes with one it has never seen, so each site belongs to one side only.
+ */
+export function sharedSites(trainPages, evalPages) {
+  const trainSites = new Set(trainPages.map((p) => p.site).filter(Boolean));
+  return [...new Set(evalPages.map((p) => p.site).filter((s) => trainSites.has(s)))];
+}
+
+/** Attributes describeElement reads; anything else is noise in the dataset. */
+const KEPT_ATTRIBUTES = ["type", "placeholder", "name", "title", "alt"];
+/** Longer element text is cut: a card or paragraph, not a control label. */
+const MAX_TEXT = 120;
+
+/**
+ * Draft dataset pages from crawler output. The elements are what the locator
+ * ranks at run time (the crawl's high-intent elements), trimmed to the fields
+ * the model sees; `queries` is left empty for a person (or an LLM, reviewed by
+ * a person) to fill in. prepare.mjs rejects a page whose queries are empty, so
+ * an unfinished draft can't slip into training.
+ *
+ * @param {object} crawl a multi-page crawl result ({ session: { pages } }),
+ *   an array of crawled pages, or one crawl_and_analyze result
+ * @param {object} [options]
+ * @param {string} [options.site] site name; defaults to each page's host
+ * @returns {object[]} pages in dataset form, plus `site` and `url`
+ */
+export function crawlToPages(crawl, { site } = {}) {
+  const crawled = Array.isArray(crawl) ? crawl : (crawl?.session?.pages ?? [crawl]);
+  const pages = [];
+  const names = new Set();
+
+  for (const result of crawled) {
+    if (!result?.url || !Array.isArray(result.highIntentElements)) continue;
+    const url = new URL(result.url);
+    const siteName = site ?? url.host;
+
+    const keys = new Set();
+    const seen = new Set();
+    const elements = [];
+    for (const raw of result.highIntentElements) {
+      const el = trimElement(raw);
+      const text = describeElement(el);
+      // A bare "div" or "button" gives a query nothing to match (a typed
+      // input, "password input", still does); an exact repeat (the same link
+      // in header and footer) would make labels ambiguous.
+      const typedInput = el.tag === "input" && el.attributes?.type && !el.role;
+      if (!text.includes(":") && !typedInput) continue;
+      if (seen.has(text)) continue;
+      seen.add(text);
+      elements.push({ key: uniqueName(elementKey(el), keys), ...el });
+    }
+    if (elements.length < 2) continue;
+
+    const name = uniqueName(slug(`${siteName} ${url.pathname === "/" ? "home" : url.pathname}`), names);
+    pages.push({ page: name, site: siteName, url: result.url, elements, queries: [] });
+  }
+  return pages;
+}
+
+function trimElement(raw) {
+  const el = { tag: String(raw.tag ?? "").toLowerCase() };
+  const text = collapse(raw.text);
+  if (text) el.text = text.length > MAX_TEXT ? `${text.slice(0, MAX_TEXT - 1).trimEnd()}…` : text;
+  for (const field of ["ariaLabel", "role", "id"]) {
+    const value = collapse(raw[field]);
+    if (value) el[field] = value;
+  }
+  const attributes = {};
+  for (const name of KEPT_ATTRIBUTES) {
+    const value = collapse(raw.attributes?.[name]);
+    if (value) attributes[name] = value;
+  }
+  if (Object.keys(attributes).length) el.attributes = attributes;
+  return el;
+}
+
+/** A readable key: the element's id if it has one, else its label. */
+function elementKey(el) {
+  const label =
+    el.id ?? el.ariaLabel ?? el.text ?? el.attributes?.placeholder ?? el.attributes?.name ?? el.attributes?.title ?? `${el.attributes?.type ?? ""} ${el.tag}`;
+  return slug(label).slice(0, 40).replace(/-+$/, "") || el.tag;
+}
+
+function uniqueName(base, taken) {
+  let name = base;
+  for (let n = 2; taken.has(name); n++) name = `${base}-${n}`;
+  taken.add(name);
+  return name;
+}
+
+function slug(text) {
+  return String(text)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function collapse(value) {
+  return typeof value === "string" ? value.replace(/\s+/g, " ").trim() : undefined;
+}
+
 function normalise(text) {
   return text.trim().toLowerCase().replace(/\s+/g, " ");
 }
