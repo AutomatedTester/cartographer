@@ -20,7 +20,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
-import { crawlToPages } from "./lib.mjs";
+import { crawlScope, crawlToPages } from "./lib.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const { values: args } = parseArgs({
@@ -65,6 +65,8 @@ if (args.url.length) {
       // Elements only: no workflow analysis, and never type into a login form.
       detectWorkflows: false,
       enableAutoLogin: false,
+      // Stay on the site asked for: links to other sites are someone else's.
+      urlPatterns: { include: [crawlScope(startUrl)] },
     });
     const result = await crawler.crawl();
     if (args["save-raw"]) {

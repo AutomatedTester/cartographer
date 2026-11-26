@@ -11,6 +11,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  crawlScope,
   crawlToPages,
   loadPages,
   pageElements,
@@ -234,7 +235,30 @@ describe("crawlToPages", () => {
     assert.ok(drafts.every((p) => p.site === "shop"));
   });
 
+  it("keeps one copy of a page several URLs render identically", () => {
+    const wall = (url) => crawled(url, [
+      { tag: "button", text: "Log In" },
+      { tag: "a", text: "Forgot password" },
+    ]);
+    const drafts = crawlToPages([wall("https://shop.test/orders"), wall("https://shop.test/offers")]);
+    assert.deepEqual(drafts.map((p) => p.url), ["https://shop.test/orders"]);
+  });
+
   it("accepts a single crawl_and_analyze result", () => {
     assert.equal(crawlToPages(login).length, 1);
+  });
+});
+
+describe("crawlScope", () => {
+  it("keeps a crawl on the start page's origin and folder", () => {
+    const scope = new RegExp(crawlScope("https://org.github.io/demo/index.html"));
+    assert.ok(scope.test("https://org.github.io/demo/upload.html"));
+    assert.ok(!scope.test("https://org.github.io/other/"));
+    assert.ok(!scope.test("https://applepaydemo.apple.com/"));
+    assert.ok(!scope.test("https://orgXgithub.io/demo/"));
+
+    const root = new RegExp(crawlScope("shop.test"));
+    assert.ok(root.test("https://shop.test/cart"));
+    assert.ok(!root.test("https://shop.test.evil.example/"));
   });
 });

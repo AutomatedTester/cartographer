@@ -294,11 +294,22 @@ describe("MultiPageCrawler: url resolution", () => {
     assert.equal(await targetsFrom("item#reviews"), "https://shop.test/catalog/item");
   });
 
-  it("treats a path without a trailing slash as a directory", async () => {
+  // As a browser does: the last path segment is a file, not a folder. Treating
+  // it as a folder sent every link on .../index.html to .../index.html/page,
+  // which on a static host is a 404 page crawled in place of the real one.
+  it("resolves against the page's folder when the path ends in a file", async () => {
+    assert.equal(
+      await targetsFrom("permissions.html", "https://org.github.io/demo/index.html"),
+      "https://org.github.io/demo/permissions.html"
+    );
     assert.equal(
       await targetsFrom("item", "https://shop.test/catalog"),
-      "https://shop.test/catalog/item"
+      "https://shop.test/item"
     );
+  });
+
+  it("resolves a parent-relative url", async () => {
+    assert.equal(await targetsFrom("../about"), "https://shop.test/about");
   });
 });
 
