@@ -165,6 +165,21 @@ export function sharedSites(trainPages, evalPages) {
   return [...new Set(evalPages.map((p) => p.site).filter((s) => trainSites.has(s)))];
 }
 
+/**
+ * A URL pattern (regex source) for staying on the site a crawl started from:
+ * the same origin, under the start page's folder. A project site on a shared
+ * host (example.github.io/app/) keeps to /app/, not every site on that host.
+ */
+export function crawlScope(startUrl) {
+  const url = new URL(/^https?:\/\//.test(startUrl) ? startUrl : `https://${startUrl}`);
+  const folder = url.pathname.replace(/[^/]*$/, "");
+  return `^${escapeRegExp(url.origin + folder)}`;
+}
+
+function escapeRegExp(text) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 /** Attributes describeElement reads; anything else is noise in the dataset. */
 const KEPT_ATTRIBUTES = ["type", "placeholder", "name", "title", "alt"];
 /** Longer element text is cut: a card or paragraph, not a control label. */
@@ -187,6 +202,9 @@ export function crawlToPages(crawl, { site } = {}) {
   const crawled = Array.isArray(crawl) ? crawl : (crawl?.session?.pages ?? [crawl]);
   const pages = [];
   const names = new Set();
+  // Several URLs often render one page (a login wall in front of every
+  // account route); a second copy only weights that page twice.
+  const layouts = new Set();
 
   for (const result of crawled) {
     if (!result?.url || !Array.isArray(result.highIntentElements)) continue;
@@ -209,6 +227,9 @@ export function crawlToPages(crawl, { site } = {}) {
       elements.push({ key: uniqueName(elementKey(el), keys), ...el });
     }
     if (elements.length < 2) continue;
+    const layout = `${siteName}\n${[...seen].sort().join("\n")}`;
+    if (layouts.has(layout)) continue;
+    layouts.add(layout);
 
     const name = uniqueName(slug(`${siteName} ${url.pathname === "/" ? "home" : url.pathname}`), names);
     pages.push({ page: name, site: siteName, url: result.url, elements, queries: [] });
