@@ -17,6 +17,7 @@
     "pretest:coverage": "npm run build && npm run build:browser",
     "test:coverage": "node --test --experimental-test-coverage --test-coverage-include='build/**' --test-coverage-exclude='build/test/**' --test-coverage-exclude='build/analyzer.browser.js' --test-coverage-exclude='build/types.js' --test-coverage-lines=89 --test-coverage-branches=90 --test-coverage-functions=92 test/unit/*.test.js",
     "benchmark:install": "npm --prefix benchmark/app install --no-audit --no-fund",
+    "train:harvest": "npm run build && npm run build:browser && node training/harvest.mjs",
     "train:prepare": "npm run build && node training/prepare.mjs",
     "train:evaluate": "npm run build && node training/evaluate.mjs"
   },

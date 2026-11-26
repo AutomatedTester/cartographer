@@ -12,7 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 
-import { loadPages, queryTexts, toTriplets, validatePages } from "./lib.mjs";
+import { loadPages, queryTexts, sharedSites, toTriplets, validatePages } from "./lib.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const { values: args } = parseArgs({
@@ -29,6 +29,9 @@ const trainPages = loadPages(args.train);
 const problems = [
   ...validatePages(evalPages).map((p) => `eval: ${p}`),
   ...validatePages(trainPages, { heldOut: queryTexts(evalPages) }).map((p) => `train: ${p}`),
+  ...sharedSites(trainPages, evalPages).map(
+    (site) => `site ${site} is in both datasets; keep each site on one side so the score measures unseen sites`
+  ),
 ];
 if (problems.length) {
   console.error(`Dataset problems:\n  ${problems.join("\n  ")}`);
