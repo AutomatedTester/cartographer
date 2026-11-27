@@ -33,7 +33,7 @@ export async function startServer(options = {}) {
   });
 
   const client = new Client(
-    { name: "webmcp-selenium-tests", version: "1.0.0" },
+    { name: "cartographer-tests", version: "1.0.0" },
     { capabilities: {} }
   );
 
@@ -67,7 +67,7 @@ export async function startInProcessServer() {
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
 
   const client = new Client(
-    { name: "webmcp-selenium-tests-inprocess", version: "1.0.0" },
+    { name: "cartographer-tests-inprocess", version: "1.0.0" },
     { capabilities: {} }
   );
 

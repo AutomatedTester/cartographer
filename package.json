@@ -1,7 +1,7 @@
 {
-  "name": "webmcp-selenium",
+  "name": "cartographer-mcp",
   "version": "1.0.0",
-  "description": "A local MCP server that uses Selenium to crawl websites and a local ML model via Transformers.js to analyze the DOM for test recommendations.",
+  "description": "Maps a website and tells you what to test: a local MCP server that crawls with Selenium, finds user journeys, ranks risky elements with a local ML model, and writes test cases and locators.",
   "type": "module",
   "main": "build/index.js",
   "scripts": {

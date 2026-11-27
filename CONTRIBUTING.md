@@ -1,4 +1,4 @@
-# Contributing to WebMCP-Selenium
+# Contributing to Cartographer
 
 Thank you for your interest in contributing! This guide explains how to report issues, propose changes, and submit pull requests.
 
@@ -620,6 +620,6 @@ Contributors will be recognized in:
 
 ---
 
-**Thank you for contributing to WebMCP-Selenium! 🎉**
+**Thank you for contributing to Cartographer! 🎉**
 
 Your efforts help make this project better for everyone.

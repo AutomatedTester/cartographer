@@ -8,6 +8,7 @@ import { AnalysisResult, AriaAuditReport, AriaSnapshot } from "./types.js";
 import { SemanticHandlerGenerator } from "./webmcp-semantic-handlers.js";
 import { collectAriaSnapshot } from "./aria-collector.js";
 import { ARIA_ROLES, auditAriaSnapshot, failedAriaAudit } from "./aria-auditor.js";
+import { envSetting } from "./env.js";
 
 export interface CrawlAnalyzeOptions {
   scriptTimeoutMs?: number;
@@ -39,14 +40,14 @@ export class SiteCrawler {
     // A dedicated throwaway profile per crawler instance, so concurrent crawls
     // do not contend for the default profile's lock file and no crawl state
     // persists between runs.
-    this.userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "webmcp-chrome-"));
+    this.userDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "cartographer-chrome-"));
 
     options.addArguments(
       // Headless unless explicitly asked for a visible browser. This was
       // missing despite the class being documented as headless, so any
       // environment without a display (CI, containers, remote shells) failed
       // with "Chrome instance exited" at session creation.
-      ...(process.env.WEBMCP_HEADED === "1" ? [] : ["--headless=new"]),
+      ...(envSetting("CARTOGRAPHER_HEADED") === "1" ? [] : ["--headless=new"]),
       "--no-sandbox",
       "--disable-dev-shm-usage",
       "--disable-gpu",

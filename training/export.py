@@ -17,7 +17,7 @@ against PyTorch, and the quantised file against full precision; either
 check failing stops the export. Pooling (mean) and normalisation are
 done by the server, so they are not baked in.
 
-Point the server at the result with WEBMCP_LOCATOR_MODEL=<path or Hub id>.
+Point the server at the result with CARTOGRAPHER_LOCATOR_MODEL=<path or Hub id>.
 """
 from __future__ import annotations
 

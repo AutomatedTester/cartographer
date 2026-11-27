@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * WebMCP-Selenium – MCP server entry point.
+ * Cartographer – MCP server entry point.
  *
  * Exposes, among others:
  *   crawl_and_analyze   – Crawls a URL and returns AI-generated test
@@ -32,6 +32,7 @@ import { WorkflowDetector } from "./workflow-detector.js";
 import { LocatorGenerator } from "./locator-generator.js";
 import { BrowserAnalysisPipeline } from "./browser-pipeline.js";
 import { SemanticMatcher, LOCATOR_MODEL_ENV, minSimilarityFromEnv } from "./semantic-matcher.js";
+import { envSetting } from "./env.js";
 
 // ---------------------------------------------------------------------------
 // Helper Functions
@@ -61,12 +62,12 @@ const browserPipeline = new BrowserAnalysisPipeline();
 
 /**
  * Embedding model for get_element_locator, loaded on first use. Null when
- * turned off with WEBMCP_SEMANTIC_LOCATOR=off, which leaves keyword matching.
- * WEBMCP_LOCATOR_MODEL picks another model, such as a fine-tuned one.
+ * turned off with CARTOGRAPHER_SEMANTIC_LOCATOR=off, which leaves keyword matching.
+ * CARTOGRAPHER_LOCATOR_MODEL picks another model, such as a fine-tuned one.
  */
 const semanticMatcher = SemanticMatcher.disabledByEnv()
   ? null
-  : new SemanticMatcher({ model: process.env[LOCATOR_MODEL_ENV] });
+  : new SemanticMatcher({ model: envSetting(LOCATOR_MODEL_ENV) });
 
 /**
  * Minimum similarity for a semantic-only locator match. Unset keeps the
@@ -160,7 +161,7 @@ const ExportWorkflowVisualizationInput = z.object({
 // ---------------------------------------------------------------------------
 
 const server = new Server(
-  { name: "WebMCP-Selenium", version: "1.0.0" },
+  { name: "Cartographer", version: "1.0.0" },
   { capabilities: { tools: {} } }
 );
 
@@ -893,7 +894,7 @@ export { server };
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("WebMCP-Selenium MCP server running on stdio");
+  console.error("Cartographer MCP server running on stdio");
 }
 
 // Only auto-start when executed directly. Importing this module — which is how

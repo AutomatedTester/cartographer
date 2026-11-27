@@ -70,8 +70,8 @@ Two settings on the MCP server:
 
 | Variable | Value |
 |---|---|
-| `WEBMCP_LOCATOR_MODEL` | A local folder (the `export.py` output) or a Hugging Face model id |
-| `WEBMCP_LOCATOR_MIN_SIMILARITY` | The threshold `evaluate.mjs` prints for that model |
+| `CARTOGRAPHER_LOCATOR_MODEL` | A local folder (the `export.py` output) or a Hugging Face model id |
+| `CARTOGRAPHER_LOCATOR_MIN_SIMILARITY` | The threshold `evaluate.mjs` prints for that model |
 
 The threshold matters because a fine-tuned model scores on its own scale. Below
 it, a description that matches nothing on the page gets a confident answer
@@ -83,12 +83,12 @@ For example, in a Claude Desktop config:
 ```json
 {
   "mcpServers": {
-    "webmcp-selenium": {
+    "cartographer": {
       "command": "node",
       "args": ["/path/to/build/index.js"],
       "env": {
-        "WEBMCP_LOCATOR_MODEL": "/models/locator-model",
-        "WEBMCP_LOCATOR_MIN_SIMILARITY": "0.16"
+        "CARTOGRAPHER_LOCATOR_MODEL": "/models/locator-model",
+        "CARTOGRAPHER_LOCATOR_MIN_SIMILARITY": "0.16"
       }
     }
   }
@@ -104,17 +104,17 @@ The model is a build output (23 MB for the 8-bit file the server loads,
 90 MB with the full-precision copy), so keep it out of git. Options:
 
 - **Hugging Face Hub (private repository)**: easiest to share. Upload the
-  folder, then set `WEBMCP_LOCATOR_MODEL` to the repository id. For a private
+  folder, then set `CARTOGRAPHER_LOCATOR_MODEL` to the repository id. For a private
   repository, also set `HF_TOKEN` on the server.
 
   ```bash
-  hf upload your-org/webmcp-locator training/out/locator-model . --private
+  hf upload your-org/cartographer-locator training/out/locator-model . --private
   # older huggingface_hub releases: huggingface-cli upload … (same arguments)
   ```
 
 - **GitHub release asset or shared storage**: archive the folder, attach it to
   a release (or put it on a shared drive or bucket), and have machines unpack
-  it to a local path that `WEBMCP_LOCATOR_MODEL` points at.
+  it to a local path that `CARTOGRAPHER_LOCATOR_MODEL` points at.
 
 Record which data and seed produced each upload. The evaluation output is a
 good thing to paste into the release notes.

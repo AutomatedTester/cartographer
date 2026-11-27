@@ -16,6 +16,7 @@ import { existsSync, statSync } from "node:fs";
 import path from "node:path";
 
 import type { DomElement } from "./analyzer.js";
+import { envSetting } from "./env.js";
 
 /** Turns texts into one embedding each. */
 export type Embedder = (texts: string[]) => Promise<number[][]>;
@@ -24,7 +25,7 @@ export type Embedder = (texts: string[]) => Promise<number[][]>;
 export const MATCHER_MODEL = "Xenova/all-MiniLM-L6-v2";
 
 /** Environment variable that turns semantic matching off ("off", "0", "false"). */
-export const SEMANTIC_LOCATOR_ENV = "WEBMCP_SEMANTIC_LOCATOR";
+export const SEMANTIC_LOCATOR_ENV = "CARTOGRAPHER_SEMANTIC_LOCATOR";
 
 /**
  * Environment variable naming the model to use instead of MATCHER_MODEL:
@@ -32,18 +33,18 @@ export const SEMANTIC_LOCATOR_ENV = "WEBMCP_SEMANTIC_LOCATOR";
  * private one) or a local directory in Transformers.js layout, such as the
  * output of training/export.py.
  */
-export const LOCATOR_MODEL_ENV = "WEBMCP_LOCATOR_MODEL";
+export const LOCATOR_MODEL_ENV = "CARTOGRAPHER_LOCATOR_MODEL";
 
 /**
  * Environment variable overriding the minimum similarity for a semantic-only
  * locator match. A fine-tuned model scores on its own scale; set this to the
  * value training/evaluate.mjs recommends for it.
  */
-export const LOCATOR_MIN_SIMILARITY_ENV = "WEBMCP_LOCATOR_MIN_SIMILARITY";
+export const LOCATOR_MIN_SIMILARITY_ENV = "CARTOGRAPHER_LOCATOR_MIN_SIMILARITY";
 
 /** The configured minimum similarity, or undefined to keep the default. */
 export function minSimilarityFromEnv(env: NodeJS.ProcessEnv = process.env): number | undefined {
-  const value = env[LOCATOR_MIN_SIMILARITY_ENV]?.trim();
+  const value = envSetting(LOCATOR_MIN_SIMILARITY_ENV, env)?.trim();
   if (!value) return undefined;
   const n = Number(value);
   if (!Number.isFinite(n)) {
@@ -114,7 +115,7 @@ export class SemanticMatcher {
 
   /** Whether semantic matching is turned off by the environment. */
   static disabledByEnv(env: NodeJS.ProcessEnv = process.env): boolean {
-    const value = (env[SEMANTIC_LOCATOR_ENV] ?? "").trim().toLowerCase();
+    const value = (envSetting(SEMANTIC_LOCATOR_ENV, env) ?? "").trim().toLowerCase();
     return value === "off" || value === "0" || value === "false";
   }
 

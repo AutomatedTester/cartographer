@@ -35,7 +35,7 @@ describe("MCP server protocol", () => {
 
   it("completes the initialize handshake and reports server info", () => {
     const info = client.getServerVersion();
-    assert.equal(info.name, "WebMCP-Selenium");
+    assert.equal(info.name, "Cartographer");
     assert.ok(info.version, "server should report a version");
   });
 
