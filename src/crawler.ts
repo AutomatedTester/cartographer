@@ -167,7 +167,7 @@ export class SiteCrawler {
       pageLoad: pageLoadTimeoutMs,
     });
 
-    await this.driver.get(url);
+    await this.load(url);
 
     // Read the pre-built browser bundle from disk and inject it into the page.
     const __filename = fileURLToPath(import.meta.url);
@@ -284,8 +284,25 @@ export class SiteCrawler {
       throw new Error("SiteCrawler is not initialized. Call init() first.");
     }
     await this.driver.manage().setTimeouts({ pageLoad: pageLoadTimeoutMs });
-    await this.driver.get(url);
+    await this.load(url);
     return this.auditCurrentPage();
+  }
+
+  /**
+   * Navigate, and fail if Chrome could not load the page. Chrome reports a
+   * failed load (DNS, refused connection, bad certificate) by showing its own
+   * error page rather than by throwing, and analysing that page would record
+   * the site as a real page with nothing on it.
+   */
+  private async load(url: string): Promise<void> {
+    const driver = this.driver!;
+    await driver.get(url);
+    // Ask the page: chromedriver's getCurrentUrl() reports the URL requested
+    // even while Chrome is showing its error page.
+    const landedOn = String(await driver.executeScript("return window.location.href"));
+    if (landedOn.startsWith("chrome-error:")) {
+      throw new Error(loadFailureMessage(url));
+    }
   }
 
   /**
@@ -325,4 +342,15 @@ export class SiteCrawler {
   getDriver(): WebDriver | null {
     return this.driver;
   }
+}
+
+/** Why a page load ended on Chrome's error page, as far as we can tell. */
+function loadFailureMessage(url: string): string {
+  let message = `Chrome could not load ${url} and showed its error page instead.`;
+  if (url.startsWith("http:")) {
+    message +=
+      " Chrome's HTTPS-First mode tries https:// first, so an http-only site whose" +
+      " https:// address fails (for example, a certificate for another name) cannot be crawled.";
+  }
+  return message;
 }

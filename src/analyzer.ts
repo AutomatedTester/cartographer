@@ -104,9 +104,20 @@ export class DomAnalyzer {
     const modelLoadTimeoutMs = options.modelLoadTimeoutMs ?? 30_000;
 
     // PHASE 1 OPTIMIZATION: Initialize embedding cache
+    // The cache only saves recomputing embeddings. A page can block IndexedDB
+    // (Chrome then throws from indexedDB.open), so carry on without it.
     if (!this.cache) {
-      this.cache = new EmbeddingCache();
-      await this.cache.init();
+      const cache = new EmbeddingCache();
+      try {
+        await cache.init();
+        this.cache = cache;
+      } catch (err) {
+        console.warn(
+          `[analyzer] Embedding cache unavailable, continuing without it: ${
+            err instanceof Error ? err.message : String(err)
+          }`
+        );
+      }
     }
 
     // PHASE 2 OPTIMIZATION: Reuse cached model if available
