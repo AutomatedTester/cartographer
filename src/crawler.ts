@@ -171,7 +171,12 @@ export class SiteCrawler {
     // Read the pre-built browser bundle from disk and inject it into the page.
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
-    const bundlePath = path.resolve(__dirname, "analyzer.browser.js");
+    // Next to this file when built; under `npm run dev` (tsx) this file is in
+    // src/, and the bundle is still in build/.
+    const builtBundle = path.resolve(__dirname, "analyzer.browser.js");
+    const bundlePath = fs.existsSync(builtBundle)
+      ? builtBundle
+      : path.resolve(__dirname, "..", "build", "analyzer.browser.js");
     const bundleSource = fs.readFileSync(bundlePath, "utf-8");
     await this.driver.executeScript(bundleSource + "\nwindow.DomAnalyzerBundle = DomAnalyzerBundle;");
 

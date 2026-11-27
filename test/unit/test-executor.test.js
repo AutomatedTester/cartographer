@@ -66,6 +66,33 @@ describe("TestExecutor.executeTests selection", () => {
     );
   });
 
+  it("retries a failing test up to retryCount more times", async () => {
+    const fail = { success: false, message: "nope", duration: 1 };
+    const driver = fakeDriver((_tool, n) => (n < 3 ? fail : okResult));
+    const summary = await new TestExecutor(driver).executeTests(
+      [testCase()],
+      [],
+      "https://example.test",
+      2
+    );
+
+    assert.equal(driver.calls.length, 3);
+    assert.equal(summary.passedTests, 1);
+    assert.equal(summary.failedTests, 0);
+  });
+
+  it("does not retry by default, and stops retrying at retryCount", async () => {
+    const fail = { success: false, message: "nope", duration: 1 };
+    const once = fakeDriver(() => fail);
+    await new TestExecutor(once).executeTests([testCase()], [], "https://example.test");
+    assert.equal(once.calls.length, 1);
+
+    const capped = fakeDriver(() => fail);
+    const summary = await new TestExecutor(capped).executeTests([testCase()], [], "https://example.test", 2);
+    assert.equal(capped.calls.length, 3);
+    assert.equal(summary.failedTests, 1);
+  });
+
   it("returns an empty summary when nothing is runnable", async () => {
     const driver = fakeDriver(() => okResult);
     const summary = await new TestExecutor(driver).executeTests(
