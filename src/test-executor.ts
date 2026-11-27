@@ -16,12 +16,14 @@ export class TestExecutor {
    * Execute all critical tests in the browser
    * @param tests Array of generated test cases (critical only)
    * @param semanticTools Array of semantic tool schemas
+   * @param retryCount How many more times to run a test that fails
    * @returns Aggregated test execution results
    */
   async executeTests(
     tests: GeneratedTestCase[],
     semanticTools: SemanticToolSchema[],
-    url: string
+    url: string,
+    retryCount = 0
   ): Promise<TestExecutionSummary> {
     const startTime = Date.now();
     const results: TestExecutionResult[] = [];
@@ -30,7 +32,10 @@ export class TestExecutor {
     const criticalTests = tests.filter((t) => t.priority === "critical" && t.semanticTool);
 
     for (const test of criticalTests) {
-      const result = await this.executeTest(test);
+      let result = await this.executeTest(test);
+      for (let retry = 0; !result.success && retry < retryCount; retry++) {
+        result = await this.executeTest(test);
+      }
       results.push(result);
     }
 

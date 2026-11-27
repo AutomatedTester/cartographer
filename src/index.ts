@@ -302,8 +302,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
           modelLoadTimeoutMs: {
             type: "number",
-            description: "ML model initialization timeout before heuristic fallback (default: 30000).",
-            default: 30000,
+            description: "ML model initialization timeout before heuristic fallback (default: 5000).",
+            default: 5000,
           },
           detectWorkflows: {
             type: "boolean",
@@ -512,7 +512,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 
   if (name === "run_critical_tests") {
-    const { url, testIds, format } = RunCriticalTestsInput.parse(args);
+    const { url, testIds, retryCount, format } = RunCriticalTestsInput.parse(args);
 
     let analysis: AnalysisResult;
     try {
@@ -563,7 +563,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const summary: TestExecutionSummary = await executor.executeTests(
           testsToRun,
           semanticTools,
-          url
+          url,
+          retryCount
         );
 
         if (format === "json") {

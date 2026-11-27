@@ -82,17 +82,18 @@ Optional configuration via environment variables:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `CHROME_BIN` | Auto-detected | Path to Chrome executable |
-| `HEADLESS` | `true` | Run Chrome in headless mode |
-| `TIMEOUT` | `30000` | Page load timeout in milliseconds |
-| `ML_DEVICE` | Auto | ML device: `webnn`, `webgpu`, `wasm` (auto picks best) |
+| `WEBMCP_HEADED` | unset | Set to `1` to show the Chrome window instead of running headless |
+| `WEBMCP_SEMANTIC_LOCATOR` | on | `off`, `0` or `false` makes `get_element_locator` use keyword matching only |
+| `WEBMCP_LOCATOR_MODEL` | `Xenova/all-MiniLM-L6-v2` | Embedding model for `get_element_locator`: a Hugging Face id or a local directory |
+| `WEBMCP_LOCATOR_MIN_SIMILARITY` | model default | Minimum similarity for a meaning-only locator match |
+| `HF_TOKEN` | unset | Hugging Face token for a private `WEBMCP_LOCATOR_MODEL` |
+
+Chrome is found by Selenium Manager, and the analyzer picks its ML device (WebNN, WebGPU or WASM) itself. Timeouts are per-call options on `crawl_multi_page`, not environment variables.
 
 **Example:**
 
 ```bash
-export TIMEOUT=60000
-export ML_DEVICE=wasm
-npm start
+WEBMCP_HEADED=1 npm start
 ```
 
 ### MCP Server Configuration
@@ -112,8 +113,8 @@ Crawls a website, analyzes its DOM, and generates prioritized test cases with se
 ```typescript
 interface CrawlAndAnalyzeInput {
   url: string;                    // URL to crawl (required)
-  outputFormat?: 'json' | 'markdown' | 'summary';  // Output format (default: 'json')
-  timeout?: number;               // Page load timeout in ms (default: 30000)
+  format?: 'json' | 'markdown' | 'markdown-summary';  // Output format (default: 'markdown')
+  ariaAudit?: boolean;            // Also return the audit_aria advisory (default: false)
 }
 ```
 
@@ -142,7 +143,7 @@ curl -X POST http://localhost:3000/tools/crawl_and_analyze \
   -H "Content-Type: application/json" \
   -d '{
     "url": "https://example.com",
-    "outputFormat": "json"
+    "format": "json"
   }'
 ```
 
@@ -196,7 +197,7 @@ curl -X POST http://localhost:3000/tools/crawl_and_analyze \
 ```json
 {
   "url": "https://example.com",
-  "outputFormat": "markdown"
+  "format": "markdown"
 }
 ```
 
@@ -207,7 +208,7 @@ Returns a formatted Markdown document with test cases in table format, tool defi
 ```json
 {
   "url": "https://example.com",
-  "outputFormat": "summary"
+  "format": "markdown-summary"
 }
 ```
 
@@ -313,8 +314,10 @@ Executes high-priority test cases (score ≥ 50) using auto-generated semantic t
 
 ```typescript
 interface RunCriticalTestsInput {
-  testIds?: string[];    // Specific test IDs to run (optional)
-  // If omitted, runs all critical + high priority tests
+  url: string;                   // URL to crawl and test (required)
+  testIds?: string[];            // Specific test IDs to run; if omitted, runs all critical tests
+  retryCount?: number;           // Re-run a failing test up to this many more times (default: 0)
+  format?: 'json' | 'markdown';  // default: 'json'
 }
 ```
 
@@ -571,7 +574,7 @@ curl -X POST http://localhost:3000/tools/crawl_and_analyze \
   -H "Content-Type: application/json" \
   -d '{
     "url": "https://github.com",
-    "outputFormat": "json"
+    "format": "json"
   }' > github-tests.json
 
 cat github-tests.json
@@ -589,7 +592,7 @@ curl -X POST http://localhost:3000/tools/crawl_and_analyze \
   -H "Content-Type: application/json" \
   -d '{
     "url": "https://example.com/login",
-    "outputFormat": "json"
+    "format": "json"
   }' > login-tests.json
 
 # Step 2: Get locator for email input
@@ -628,7 +631,7 @@ async function testCheckout() {
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify({
       url: 'https://myshop.com/checkout',
-      outputFormat: 'json'
+      format: 'json'
     })
   });
 
@@ -673,7 +676,7 @@ curl -X POST http://localhost:3000/tools/crawl_and_analyze \
   -H "Content-Type: application/json" \
   -d '{
     "url": "https://example.com",
-    "outputFormat": "markdown"
+    "format": "markdown"
   }' > test-report.md
 
 # Open in markdown viewer or convert to PDF
@@ -945,12 +948,7 @@ Error: Could not find Chrome/Chromium installation
 **Solution:**
 
 1. Install Google Chrome from <https://google.com/chrome>
-2. Or set `CHROME_BIN` environment variable:
-
-   ```bash
-   export CHROME_BIN=/Applications/Google\ Chrome.app/Contents/MacOS/Google\ Chrome
-   npm start
-   ```
+2. Selenium Manager downloads a matching chromedriver on first run, so it needs network access the first time.
 
 ### "ML Model failed to load" Error
 
@@ -964,7 +962,7 @@ Error: Failed to initialize ML model
 
 - Wait longer for WASM model to load (first time is slowest)
 - Check console logs for model loading progress
-- Set `ML_DEVICE=wasm` explicitly to skip WebNN/WebGPU attempts
+- On `crawl_multi_page`, raise `modelLoadTimeoutMs` (default 5000) so the model has time to download before heuristic scoring takes over
 
 ### "Page load timeout" Error
 
@@ -974,7 +972,7 @@ Error: Page did not load within timeout
 
 **Solution:**
 
-- Increase timeout: `npm run dev` with `TIMEOUT=60000`
+- Increase `pageLoadTimeout` on `crawl_multi_page` (up to 180000 ms)
 - Check if URL is accessible (test in browser manually)
 - Try a simpler URL first to ensure system works
 
@@ -1039,11 +1037,10 @@ node -e "require('@huggingface/transformers').pipeline('feature-extraction', 'Xe
 **To speed up:**
 
 ```bash
-# 1. Reduce timeout for fast pages
-TIMEOUT=15000 npm start
+# 1. Lower pageLoadTimeout / maxPages on crawl_multi_page for fast sites
 
 # 2. Use summary format (skips detailed analysis)
-curl -d '{"url": "...", "outputFormat": "summary"}' ...
+curl -d '{"url": "...", "format": "markdown-summary"}' ...
 
 # 3. Pre-load ML model
 node -e "require('@huggingface/transformers').pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2')"
@@ -1109,7 +1106,7 @@ jobs:
           sleep 2  # Wait for server to start
           curl -X POST http://localhost:3000/tools/crawl_and_analyze \
             -H "Content-Type: application/json" \
-            -d '{"url": "http://localhost:3001", "outputFormat": "markdown"}' \
+            -d '{"url": "http://localhost:3001", "format": "markdown"}' \
             > test-report.md
 
       - name: Comment PR with report
@@ -1136,7 +1133,7 @@ describe('Generated tests', () => {
   test('should pass critical elements', async () => {
     const {testCases} = await crawlAndAnalyze({
       url: 'http://localhost:3001',
-      outputFormat: 'json'
+      format: 'json'
     });
 
     const criticalTests = testCases.filter(t => t.priority === 'critical');
