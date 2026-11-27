@@ -6,3 +6,6 @@ entities.json
 .claude/
 training/out/
 __pycache__/
+.DS_Store
+# Written by test/manual/retrieve-workflows.js
+WORKFLOWS_FULL_REPORT.md

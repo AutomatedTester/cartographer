@@ -57,8 +57,6 @@ For detailed usage examples and API reference, see [USAGE.md](USAGE.md).
 | **[test/README.md](test/README.md)** | How the unit and integration suites, coverage floor and benchmark app fit together |
 | **[training/README.md](training/README.md)** | Fine-tuning the embedding model used by `get_element_locator` |
 
-See [CRAWL_RESULTS.md](CRAWL_RESULTS.md) for a real-world example of multi-page crawl results.
-
 ---
 
 ## Architecture
