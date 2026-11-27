@@ -24,6 +24,12 @@ the training data), three training runs with different seeds:
 It fixed "basket" vs "cart" style misses. It still confuses "sign up" with a
 "Sign In" button and "complete purchase" with "Continue to Payment".
 
+These numbers predate the harvested pages now in `data/`. The held-out set
+has since grown to 55 descriptions: the 20 above, plus 35 on pages from
+the-internet.herokuapp.com and quotes.toscrape.com. On all 55, keyword
+matching gets 22 and the stock model 34 (descriptive ids). The fine-tuned row
+needs re-running on the larger training set.
+
 Treat these numbers as a smoke test, not a benchmark: both sets are small and
 were written by the same person, so they share a style. Real descriptions from
 your users, added to `data/`, are what make the model, and the score, worth
