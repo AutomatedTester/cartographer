@@ -223,6 +223,7 @@
         <details class="tool">
           <summary><span class="n">06</span><span class="name">get_workflow_by_name</span><span class="desc">Fetch one detected workflow from a crawl session.</span><span class="chev">›</span></summary>
           <div class="body">
+            <p><code>workflowName</code> takes a name or an ID. When several workflows share a name, you get the highest-confidence one and the IDs of the rest.</p>
 <pre><code>{ <span class="k">"sessionId"</span>: <span class="s">"session_…"</span>, <span class="k">"workflowName"</span>: <span class="s">"login_flow"</span> }</code></pre>
           </div>
         </details>

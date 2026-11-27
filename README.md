@@ -266,6 +266,8 @@ Returns one detected workflow from a `crawl_multi_page` session.
 }
 ```
 
+`workflowName` takes a workflow's name or its ID. Several workflows can share a name (for example, two `form_submission_flow`s on different pages). A name returns the highest-confidence one, plus a note listing the IDs of the others. Pass an ID to get a specific one.
+
 ### 7. `export_workflow_visualization`
 
 Exports the workflows from a `crawl_multi_page` session as Markdown, with page sequences, actions and flow diagrams.
