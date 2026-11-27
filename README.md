@@ -2,9 +2,20 @@
 
 **Maps your site, then tells you what to test.**
 
-Point Cartographer at a URL and it charts the site: the pages, the user journeys that run through them, and the elements most likely to break. It hands back prioritised test cases, stable locators you can find by describing an element in plain English, and an optional ARIA review.
+Cartographer is an MCP server. Give it a URL and it crawls the site in Chrome, then tells you what to test there.
 
-Under the hood it is a local **Model Context Protocol (MCP)** server that combines **Selenium** browser automation with a **local ML model** (via [Transformers.js](https://huggingface.co/docs/transformers.js)) to crawl a website, analyse its DOM, and generate a prioritised list of test candidates.
+**What you get back**
+
+- **Test cases, in priority order.** It looks for the elements most likely to break and writes a test case for each. Use [`crawl_and_analyze`](#1-crawl_and_analyze).
+- **User journeys.** It crawls a whole site and finds flows that span several pages, such as login, sign-up, checkout and search. It can sign in first if you give it credentials. Use [`crawl_multi_page`](#5-crawl_multi_page).
+- **Stable locators.** Describe an element in plain English ("checkout button") and get back a CSS or XPath selector. Use [`get_element_locator`](#2-get_element_locator).
+- **An ARIA review (optional).** It flags ARIA that is likely to mislead screen-reader users. Use [`audit_aria`](#4-audit_aria).
+
+**How it works**
+
+- It runs on your machine and talks to your MCP client (such as Claude Desktop) over stdio.
+- [Selenium](https://www.selenium.dev/) drives a headless Chrome to load pages and read the DOM.
+- Small embedding models score elements and match descriptions. They run locally through [Transformers.js](https://huggingface.co/docs/transformers.js) and are downloaded from Hugging Face on first use. Page content is never sent to a remote model.
 
 ---
 
