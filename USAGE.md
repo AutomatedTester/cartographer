@@ -1,6 +1,6 @@
 # Usage Guide
 
-Comprehensive guide to installing and using WebMCP-Selenium, including API reference, examples, and troubleshooting.
+Comprehensive guide to installing and using Cartographer, including API reference, examples, and troubleshooting.
 
 ## Table of Contents
 
@@ -27,7 +27,7 @@ Comprehensive guide to installing and using WebMCP-Selenium, including API refer
 ### npm Install
 
 ```bash
-npm install friendly-octo-train
+npm install cartographer-mcp
 ```
 
 ### Peer Dependencies
@@ -55,7 +55,7 @@ To use as a Model Context Protocol server (e.g., with Claude Desktop):
    ```json
    {
      "mcpServers": {
-       "web-mcp-selenium": {
+       "cartographer": {
          "command": "node",
          "args": ["/absolute/path/to/project/build/index.js"]
        }
@@ -82,18 +82,18 @@ Optional configuration via environment variables:
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `WEBMCP_HEADED` | unset | Set to `1` to show the Chrome window instead of running headless |
-| `WEBMCP_SEMANTIC_LOCATOR` | on | `off`, `0` or `false` makes `get_element_locator` use keyword matching only |
-| `WEBMCP_LOCATOR_MODEL` | `Xenova/all-MiniLM-L6-v2` | Embedding model for `get_element_locator`: a Hugging Face id or a local directory |
-| `WEBMCP_LOCATOR_MIN_SIMILARITY` | model default | Minimum similarity for a meaning-only locator match |
-| `HF_TOKEN` | unset | Hugging Face token for a private `WEBMCP_LOCATOR_MODEL` |
+| `CARTOGRAPHER_HEADED` | unset | Set to `1` to show the Chrome window instead of running headless |
+| `CARTOGRAPHER_SEMANTIC_LOCATOR` | on | `off`, `0` or `false` makes `get_element_locator` use keyword matching only |
+| `CARTOGRAPHER_LOCATOR_MODEL` | `Xenova/all-MiniLM-L6-v2` | Embedding model for `get_element_locator`: a Hugging Face id or a local directory |
+| `CARTOGRAPHER_LOCATOR_MIN_SIMILARITY` | model default | Minimum similarity for a meaning-only locator match |
+| `HF_TOKEN` | unset | Hugging Face token for a private `CARTOGRAPHER_LOCATOR_MODEL` |
 
 Chrome is found by Selenium Manager, and the analyzer picks its ML device (WebNN, WebGPU or WASM) itself. Timeouts are per-call options on `crawl_multi_page`, not environment variables.
 
 **Example:**
 
 ```bash
-WEBMCP_HEADED=1 npm start
+CARTOGRAPHER_HEADED=1 npm start
 ```
 
 ### MCP Server Configuration
@@ -240,9 +240,9 @@ Elements are ranked by meaning, with shared words as a bounded tie-breaker. An e
 
 The result says which method found the element (`Matched by: semantic`, `keyword+semantic` or `keyword`). If the model can't be loaded (offline, say) or isn't ready within 15 seconds, the lookup uses keyword matching alone and says so (`keyword only`).
 
-Set `WEBMCP_SEMANTIC_LOCATOR=off` in the server's environment to always use keyword matching alone.
+Set `CARTOGRAPHER_SEMANTIC_LOCATOR=off` in the server's environment to always use keyword matching alone.
 
-To use a fine-tuned model, set `WEBMCP_LOCATOR_MODEL` to its folder or Hugging Face id, and `WEBMCP_LOCATOR_MIN_SIMILARITY` to the threshold its evaluation recommends. [training/README.md](training/README.md) covers training, evaluating and storing one.
+To use a fine-tuned model, set `CARTOGRAPHER_LOCATOR_MODEL` to its folder or Hugging Face id, and `CARTOGRAPHER_LOCATOR_MIN_SIMILARITY` to the threshold its evaluation recommends. [training/README.md](training/README.md) covers training, evaluating and storing one.
 
 #### Output Schema
 
@@ -690,7 +690,7 @@ Crawl multiple pages including those behind a login form.
 #### Setup: Store Credentials in Session
 
 ```javascript
-import { MultiPageCrawler } from 'friendly-octo-train';
+import { MultiPageCrawler } from 'cartographer-mcp';
 
 // Create crawler configuration
 const config = {
@@ -811,7 +811,7 @@ session.updateState('password', process.env.LOGIN_PASS);
 #### Real-World Example: Testing Protected API Dashboard
 
 ```javascript
-import { MultiPageCrawler } from 'friendly-octo-train';
+import { MultiPageCrawler } from 'cartographer-mcp';
 import fs from 'fs';
 
 async function auditProtectedDashboard() {
@@ -1127,7 +1127,7 @@ jobs:
 
 ```javascript
 // test.spec.js
-import { crawlAndAnalyze, getElementLocator } from 'friendly-octo-train';
+import { crawlAndAnalyze, getElementLocator } from 'cartographer-mcp';
 
 describe('Generated tests', () => {
   test('should pass critical elements', async () => {

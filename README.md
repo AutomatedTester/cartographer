@@ -1,6 +1,10 @@
-# WebMCP-Selenium
+# Cartographer
 
-A local **Model Context Protocol (MCP)** server that combines **Selenium** browser automation with a **local ML model** (via [Transformers.js](https://huggingface.co/docs/transformers.js)) to crawl a website, analyse its DOM, and generate a prioritised list of test candidates.
+**Maps your site, then tells you what to test.**
+
+Point Cartographer at a URL and it charts the site: the pages, the user journeys that run through them, and the elements most likely to break. It hands back prioritised test cases, stable locators you can find by describing an element in plain English, and an optional ARIA review.
+
+Under the hood it is a local **Model Context Protocol (MCP)** server that combines **Selenium** browser automation with a **local ML model** (via [Transformers.js](https://huggingface.co/docs/transformers.js)) to crawl a website, analyse its DOM, and generate a prioritised list of test candidates.
 
 ---
 
@@ -115,15 +119,15 @@ Model fine-tuning scripts (`train:harvest`, `train:prepare`, `train:evaluate`) a
 
 ## Environment Variables
 
-All are optional.
+All are optional. Settings written for the old WebMCP-Selenium name (`WEBMCP_*`) are still read when the `CARTOGRAPHER_*` one is unset.
 
 | Variable | Effect |
 |---|---|
-| `WEBMCP_HEADED=1` | Show the Chrome window instead of running headless |
-| `WEBMCP_SEMANTIC_LOCATOR=off` | `get_element_locator` uses keyword matching only (`0` and `false` also work) |
-| `WEBMCP_LOCATOR_MODEL` | Embedding model for `get_element_locator`: a Hugging Face id or a local directory, such as a fine-tuned model |
-| `WEBMCP_LOCATOR_MIN_SIMILARITY` | Minimum similarity for a meaning-only locator match; set it for a fine-tuned model |
-| `HF_TOKEN` | Hugging Face token, needed only for a private `WEBMCP_LOCATOR_MODEL` |
+| `CARTOGRAPHER_HEADED=1` | Show the Chrome window instead of running headless |
+| `CARTOGRAPHER_SEMANTIC_LOCATOR=off` | `get_element_locator` uses keyword matching only (`0` and `false` also work) |
+| `CARTOGRAPHER_LOCATOR_MODEL` | Embedding model for `get_element_locator`: a Hugging Face id or a local directory, such as a fine-tuned model |
+| `CARTOGRAPHER_LOCATOR_MIN_SIMILARITY` | Minimum similarity for a meaning-only locator match; set it for a fine-tuned model |
+| `HF_TOKEN` | Hugging Face token, needed only for a private `CARTOGRAPHER_LOCATOR_MODEL` |
 
 ---
 
@@ -163,7 +167,7 @@ Call `crawl_and_analyze` first; this tool looks up elements from the most recent
 
 **Output**: Stable CSS or XPath locator string. See [USAGE.md](USAGE.md#tool-2-get_element_locator) for examples.
 
-Elements are matched by meaning as well as by shared words, so "checkout button" can find a button labelled "Proceed to payment". This uses a local embedding model (`Xenova/all-MiniLM-L6-v2`, about 23 MB, downloaded from Hugging Face on first use). Set `WEBMCP_SEMANTIC_LOCATOR=off` to use keyword matching only. To train your own model for this, see [training/README.md](training/README.md).
+Elements are matched by meaning as well as by shared words, so "checkout button" can find a button labelled "Proceed to payment". This uses a local embedding model (`Xenova/all-MiniLM-L6-v2`, about 23 MB, downloaded from Hugging Face on first use). Set `CARTOGRAPHER_SEMANTIC_LOCATOR=off` to use keyword matching only. To train your own model for this, see [training/README.md](training/README.md).
 
 ### 3. `run_critical_tests`
 
@@ -274,7 +278,7 @@ Exports the workflows from a `crawl_multi_page` session as Markdown, with page s
 Add the following to your `claude_desktop_config.json` (or equivalent MCP client settings):
 
 ```json
-"web-mcp-selenium": {
+"cartographer": {
   "command": "node",
   "args": ["/path/to/project/build/index.js"]
 }

@@ -7,13 +7,13 @@
  *   node training/evaluate.mjs [--model ID_OR_PATH ...] [--data FILE] [--json]
  *
  * --model may be repeated; it defaults to the stock model. Each model is
- * loaded exactly as the server loads WEBMCP_LOCATOR_MODEL, so a Hub id or an
+ * loaded exactly as the server loads CARTOGRAPHER_LOCATOR_MODEL, so a Hub id or an
  * export.py output directory both work.
  *
  * For each model it reports top-1 accuracy with descriptive ids (as in the
  * benchmark app) and neutral ids (el0, el1, …: no hint in the id), whether any
  * unrelated description got an answer, and the threshold to set with
- * WEBMCP_LOCATOR_MIN_SIMILARITY so that none does.
+ * CARTOGRAPHER_LOCATOR_MIN_SIMILARITY so that none does.
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -119,7 +119,7 @@ if (args.json) {
   for (const r of results.slice(1)) {
     console.log(`\n${r.label}: highest similarity for an unrelated description ${r.unrelated.maxSimilarity.toFixed(2)}`);
     if (r.threshold !== undefined && r.threshold !== MIN_SEMANTIC_SIMILARITY) {
-      console.log(`  to use it: WEBMCP_LOCATOR_MODEL=${r.label} WEBMCP_LOCATOR_MIN_SIMILARITY=${r.threshold}`);
+      console.log(`  to use it: CARTOGRAPHER_LOCATOR_MODEL=${r.label} CARTOGRAPHER_LOCATOR_MIN_SIMILARITY=${r.threshold}`);
     }
     for (const m of r.misses) {
       const sim = m.similarity === undefined ? "" : ` (similarity ${m.similarity.toFixed(2)})`;

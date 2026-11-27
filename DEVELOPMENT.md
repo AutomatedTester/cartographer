@@ -1,6 +1,6 @@
 # Development Guide
 
-This guide covers everything you need to contribute to WebMCP-Selenium: setup, architecture, development workflow, and guidelines for adding features.
+This guide covers everything you need to contribute to Cartographer: setup, architecture, development workflow, and guidelines for adding features.
 
 ## Table of Contents
 

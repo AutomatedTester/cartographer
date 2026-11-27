@@ -1,7 +1,7 @@
 # WebNN Optimization Plan - Navigation Index
 
 **Date:** March 3, 2026  
-**Project:** friendly-octo-train (WebMCP-Selenium)  
+**Project:** friendly-octo-train (Cartographer)  
 **Objective:** Eliminate Copilot token waste by maximizing WebNN browser usage
 
 ---
