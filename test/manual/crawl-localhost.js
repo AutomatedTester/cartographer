@@ -15,9 +15,11 @@ const config = {
     concurrencyLimit: 3,
     detectWorkflows: true,
     workflowStrategy: 'both',
+    // Supply a login for the app under test via the environment, e.g.
+    //   CRAWL_USERNAME=me@example.com CRAWL_PASSWORD=... node test/manual/run-manual.js crawl-localhost.js
     credentials: {
-        username: 'robin-31012026@theautomatedtester.co.uk',
-        password: 'judg3dr3dd',
+        username: process.env.CRAWL_USERNAME ?? '',
+        password: process.env.CRAWL_PASSWORD ?? '',
     },
 };
 
