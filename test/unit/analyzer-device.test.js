@@ -154,6 +154,23 @@ describe("analyzer model selection", () => {
   });
 });
 
+describe("analyzer without IndexedDB", () => {
+  // Some pages block storage, and Chrome then throws from indexedDB.open().
+  // The embedding cache is only an optimisation, so the page must still be
+  // analysed; this used to abort the crawl of the whole page.
+  for (const [label, indexedDB] of [
+    ["denied by the page", "denied"],
+    ["absent", false],
+  ]) {
+    it(`initialises and loads the model when IndexedDB is ${label}`, async () => {
+      const analyzer = await initAnalyzer({ webnn: false, indexedDB });
+
+      assert.equal(stubState().calls.length, 1, "the model should still load");
+      assert.equal(analyzer.device, "webgpu", "the model should be in use, not heuristics");
+    });
+  }
+});
+
 describe("analyzer model caching", () => {
   it("loads the model once and reuses it across analyzer instances", async () => {
     restoreGlobals = installBrowserGlobals({ webnn: false });

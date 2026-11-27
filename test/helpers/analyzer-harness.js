@@ -94,7 +94,9 @@ class FakeIndexedDBRequest {
  * @param {boolean} [options.webnnThrows] make navigator.ml.createContext reject
  * @param {number} [options.deviceMemory] navigator.deviceMemory in GB
  * @param {string} [options.effectiveType] navigator.connection.effectiveType
- * @param {boolean} [options.indexedDB] expose a working indexedDB (default true)
+ * @param {boolean|"denied"} [options.indexedDB] expose a working indexedDB
+ *   (default true); false leaves it undefined, "denied" makes open() throw
+ *   the SecurityError Chrome raises when the page's storage is blocked
  * @returns {() => void} restore function
  */
 export function installBrowserGlobals(options = {}) {
@@ -151,7 +153,19 @@ export function installBrowserGlobals(options = {}) {
     querySelectorAll: () => [],
     querySelector: () => null,
   });
-  if (withIndexedDb) {
+  if (withIndexedDb === "denied") {
+    // What Chrome does when the page's storage is blocked (sandboxed or opaque
+    // origins, some insecure-context pages): open() itself throws.
+    define("indexedDB", {
+      open: () => {
+        const err = new Error(
+          "Failed to execute 'open' on 'IDBFactory': access to the Indexed Database API is denied in this context."
+        );
+        err.name = "SecurityError";
+        throw err;
+      },
+    });
+  } else if (withIndexedDb) {
     define("indexedDB", { open: () => new FakeIndexedDBRequest() });
   } else {
     delete globalThis.indexedDB;
