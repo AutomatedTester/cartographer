@@ -11,6 +11,7 @@
  *                         the page harder to use with assistive technology.
  */
 
+import { realpathSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -1048,9 +1049,19 @@ async function main(): Promise<void> {
 // Only auto-start when executed directly. Importing this module — which is how
 // the in-process tests reach `server` — must not seize stdio, or the importing
 // process's own stdout becomes a protocol stream.
-const executedDirectly =
-  process.argv[1] !== undefined &&
-  import.meta.url === pathToFileURL(process.argv[1]).href;
+// npm installs the `bin` entry as a symlink, and import.meta.url is the
+// resolved path while argv[1] is the link, so compare real paths.
+function isExecutedDirectly(): boolean {
+  const entry = process.argv[1];
+  if (entry === undefined) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(entry)).href;
+  } catch {
+    return import.meta.url === pathToFileURL(entry).href;
+  }
+}
+
+const executedDirectly = isExecutedDirectly();
 
 if (executedDirectly) {
   main().catch((err) => {
