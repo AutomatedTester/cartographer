@@ -296,12 +296,26 @@ export class SiteCrawler {
    */
   private async load(url: string): Promise<void> {
     const driver = this.driver!;
-    await driver.get(url);
+    try {
+      await driver.get(url);
+    } catch (err) {
+      // chromedriver throws "unknown error: net::ERR_..." for some failures
+      // (a refused port, an unresolvable host) instead of showing the page.
+      const thrown = err instanceof Error ? err.message : String(err);
+      const netError = thrown.match(/net::(ERR_[A-Z0-9_]+)/);
+      if (netError) throw new Error(loadFailureMessage(url, netError[1]));
+      throw err;
+    }
     // Ask the page: chromedriver's getCurrentUrl() reports the URL requested
     // even while Chrome is showing its error page.
     const landedOn = String(await driver.executeScript("return window.location.href"));
     if (landedOn.startsWith("chrome-error:")) {
-      throw new Error(loadFailureMessage(url));
+      // The error page names its net error (ERR_CONNECTION_REFUSED and so
+      // on). Reading it is best effort: the load has failed either way.
+      const errorCode = await driver
+        .executeScript<string | null>(READ_CHROME_ERROR_CODE)
+        .catch(() => null);
+      throw new Error(loadFailureMessage(url, errorCode));
     }
   }
 
@@ -344,13 +358,73 @@ export class SiteCrawler {
   }
 }
 
-/** Why a page load ended on Chrome's error page, as far as we can tell. */
-function loadFailureMessage(url: string): string {
-  let message = `Chrome could not load ${url} and showed its error page instead.`;
-  if (url.startsWith("http:")) {
-    message +=
-      " Chrome's HTTPS-First mode tries https:// first, so an http-only site whose" +
-      " https:// address fails (for example, a certificate for another name) cannot be crawled.";
+/**
+ * Script that reads the net error code off Chrome's error page, or null. The
+ * page shows it in an `.error-code` element ("ERR_CONNECTION_REFUSED"), and a
+ * certificate interstitial shows it as "NET::ERR_CERT_..." in its text.
+ */
+export const READ_CHROME_ERROR_CODE = `
+  const pattern = /(?:NET::)?ERR_[A-Z0-9_]+/;
+  const el = document.querySelector('.error-code, #error-code');
+  const fromElement = el && el.textContent ? el.textContent.match(pattern) : null;
+  if (fromElement) return fromElement[0];
+  const fromText = document.body ? (document.body.innerText || '').match(pattern) : null;
+  return fromText ? fromText[0] : null;
+`;
+
+/** Plain-language meaning of the net errors a crawl is likely to meet. */
+const NET_ERROR_MEANINGS: Record<string, string> = {
+  ERR_CONNECTION_REFUSED: "the connection was refused; nothing is listening at that address and port",
+  ERR_UNSAFE_PORT: "Chrome will not connect to this port; it is on Chrome's list of restricted ports",
+  ERR_NAME_NOT_RESOLVED: "the host name could not be resolved; the DNS lookup failed",
+  ERR_NAME_RESOLUTION_FAILED: "the host name could not be resolved; the DNS lookup failed",
+  ERR_ADDRESS_UNREACHABLE: "the address is unreachable from this machine",
+  ERR_INTERNET_DISCONNECTED: "this machine is not connected to the internet",
+  ERR_CONNECTION_TIMED_OUT: "the connection timed out; the server did not answer",
+  ERR_TIMED_OUT: "the request timed out",
+  ERR_CONNECTION_RESET: "the connection was reset by the server",
+  ERR_CONNECTION_CLOSED: "the server closed the connection without a response",
+  ERR_EMPTY_RESPONSE: "the server closed the connection without sending anything",
+  ERR_SSL_PROTOCOL_ERROR: "the TLS handshake failed",
+  ERR_SSL_VERSION_OR_CIPHER_MISMATCH: "the TLS handshake failed; there is no common protocol version or cipher",
+  ERR_TOO_MANY_REDIRECTS: "the page redirects in a loop",
+  ERR_BLOCKED_BY_CLIENT: "the request was blocked by the browser",
+};
+
+/** Is this net error about TLS (certificate or handshake)? */
+function isTlsError(code: string): boolean {
+  return /^ERR_(CERT_|SSL_|BAD_SSL_)/.test(code);
+}
+
+/**
+ * Why a page load ended on Chrome's error page, naming Chrome's net error when
+ * the page showed one. HTTPS-First is blamed only where it can be the cause:
+ * an http:// URL whose failure is about TLS (Chrome tried https:// first and
+ * the certificate or handshake failed), or, when the cause is unknown, as a
+ * hint for http-only sites.
+ */
+export function loadFailureMessage(url: string, errorCode?: string | null): string {
+  const httpsFirst =
+    "Chrome's HTTPS-First mode tries https:// first, so an http-only site whose" +
+    " https:// address fails (for example, a certificate for another name) cannot be crawled.";
+  const isHttp = url.startsWith("http:");
+  const code = errorCode ? errorCode.replace(/^NET::/, "").trim() : "";
+
+  if (!code) {
+    let message = `Chrome could not load ${url} and showed its error page instead.`;
+    if (isHttp) message += ` If the site is http-only: ${httpsFirst}`;
+    return message;
   }
+
+  const meaning = isTlsError(code)
+    ? code.startsWith("ERR_CERT_")
+      ? "the site's TLS certificate was rejected"
+      : NET_ERROR_MEANINGS[code] ?? "the TLS handshake failed"
+    : NET_ERROR_MEANINGS[code];
+  let message =
+    `Chrome could not load ${url}: ${code}` +
+    (meaning ? ` (${meaning})` : "") +
+    ".";
+  if (isHttp && isTlsError(code)) message += ` ${httpsFirst}`;
   return message;
 }
