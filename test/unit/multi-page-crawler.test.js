@@ -645,15 +645,28 @@ describe("MultiPageCrawler: credentials and login gating", () => {
     };
   }
 
-  it("loads supplied credentials into session state", async () => {
+  it("loads supplied credentials into session state for the login handler", () => {
+    const { crawler } = build(
+      { credentials: { username: "ada", password: "hunter2" } },
+      {}
+    );
+    const state = crawler["sessionManager"].getState();
+
+    assert.equal(state.username, "ada");
+    assert.equal(state.password, "hunter2");
+  });
+
+  it("never returns the credentials in the crawl result", async () => {
     const { crawler } = build(
       { credentials: { username: "ada", password: "hunter2" } },
       {}
     );
     const result = await crawler.crawl();
 
-    assert.equal(result.session.sessionState.username, "ada");
-    assert.equal(result.session.sessionState.password, "hunter2");
+    assert.equal(result.session.sessionState.username, undefined);
+    assert.equal(result.session.sessionState.password, undefined);
+    const serialised = JSON.stringify(result);
+    assert.ok(!serialised.includes("hunter2"), "password must not appear in the result");
   });
 
   it("ignores a half-supplied credential pair", async () => {

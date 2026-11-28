@@ -622,14 +622,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         credentials,
       });
 
-      // If credentials provided, store them in session state for login handler
-      if (credentials) {
-        const session = (crawler as any)['sessionManager'];
-        session.updateState('username', credentials.username);
-        session.updateState('password', credentials.password);
-        console.error(`[index] Credentials stored in session for auto-login`);
-      }
-
       const result = await crawler.crawl();
 
       // Store the session for later retrieval (TTL-bounded)

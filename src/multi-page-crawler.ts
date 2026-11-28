@@ -125,6 +125,12 @@ export class MultiPageCrawler {
 
             const session = await this.sessionManager.finalize();
             session.metadata.failedPages = this.crawlErrors.length;
+
+            // The credentials were only needed to sign in during the crawl. The
+            // session is returned to MCP clients and kept for later lookups, so
+            // the password must not travel with it.
+            delete session.sessionState.username;
+            delete session.sessionState.password;
             const totalTime = Date.now() - startTime;
 
             // Infer user journeys from heuristic analysis
