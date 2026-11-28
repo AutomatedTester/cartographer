@@ -24,7 +24,7 @@ import { z } from "zod";
 import { SiteCrawler } from "./crawler.js";
 import { AnalysisResult, HighIntentElement, TestExecutionSummary, MultiPageCrawlResult, DetectedWorkflow, CrawlSession } from "./types.js";
 import { MarkdownExporter } from "./markdown-exporter.js";
-import { TestExecutor } from "./test-executor.js";
+import { TestExecutor, TestOutcome } from "./test-executor.js";
 import { SemanticToolGenerator } from "./webmcp-semantic-tools.js";
 import { MultiPageCrawler } from "./multi-page-crawler.js";
 import { SessionManager } from "./session-manager.js";
@@ -901,8 +901,20 @@ async function handleToolCall(name: string, args: unknown): Promise<ToolResult> 
   };
 }
 
-function formatTestResultsMarkdown(summary: TestExecutionSummary): string {
+const RESULT_LABELS: Record<TestOutcome, string> = {
+  passed: "✅ PASS",
+  failed: "❌ FAIL",
+  skipped: "⏭️ SKIPPED",
+  "handler-error": "⚠️ HANDLER ERROR",
+};
+
+function formatTestResultsMarkdown(summary: TestExecutionSummary & { skippedTests?: number; handlerErrors?: number }): string {
   const { url, totalTests, passedTests, failedTests, results, totalDuration } = summary;
+  const skippedTests = summary.skippedTests ?? 0;
+  const handlerErrors = summary.handlerErrors ?? 0;
+  // Skipped tests and handler errors never exercised the site, so the pass
+  // rate counts only the tests that actually ran.
+  const ran = passedTests + failedTests;
 
   let markdown = `# Test Execution Results\n\n`;
   markdown += `**URL:** ${url}\n`;
@@ -914,12 +926,17 @@ function formatTestResultsMarkdown(summary: TestExecutionSummary): string {
   markdown += `| Total Tests | ${totalTests} |\n`;
   markdown += `| Passed | ${passedTests} |\n`;
   markdown += `| Failed | ${failedTests} |\n`;
-  markdown += `| Pass Rate | ${((passedTests / totalTests) * 100).toFixed(1)}% |\n\n`;
+  markdown += `| Skipped | ${skippedTests} |\n`;
+  markdown += `| Handler errors | ${handlerErrors} |\n`;
+  markdown += `| Pass Rate | ${ran > 0 ? ((passedTests / ran) * 100).toFixed(1) + "%" : "n/a"} |\n\n`;
+  if (handlerErrors > 0) {
+    markdown += `Handler errors are Cartographer failing to attach to an element, not failures in the site.\n\n`;
+  }
 
   markdown += `## Test Results\n\n`;
 
-  for (const result of results) {
-    const status = result.success ? "✅ PASS" : "❌ FAIL";
+  for (const result of results as Array<TestExecutionSummary["results"][number] & { status?: TestOutcome }>) {
+    const status = RESULT_LABELS[result.status ?? (result.success ? "passed" : "failed")];
     markdown += `### ${status} - ${result.testId}\n\n`;
     markdown += `- **Tool:** ${result.toolName}\n`;
     markdown += `- **Message:** ${result.message}\n`;
@@ -1019,6 +1036,7 @@ export const __testing = {
     lastAnalysis = analysis;
   },
   storeSession,
+  formatTestResultsMarkdown,
 };
 
 async function main(): Promise<void> {

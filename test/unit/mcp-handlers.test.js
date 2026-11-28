@@ -455,3 +455,32 @@ describe("MCP handlers: resilience", () => {
     }
   });
 });
+
+describe("run_critical_tests Markdown report", () => {
+  it("reports skipped tests and handler errors apart from failures", async () => {
+    const { __testing } = await import("../../build/index.js");
+    const md = __testing.formatTestResultsMarkdown({
+      url: "https://shop.test/",
+      totalTests: 4,
+      passedTests: 1,
+      failedTests: 1,
+      skippedTests: 1,
+      handlerErrors: 1,
+      totalDuration: 10,
+      semanticTools: [],
+      results: [
+        { testId: "TC_A", toolName: "a", success: true, status: "passed", message: "ok", duration: 1 },
+        { testId: "TC_B", toolName: "b", success: false, status: "failed", message: "boom", duration: 1 },
+        { testId: "TC_C", toolName: "c", success: false, status: "skipped", message: "destructive", duration: 0 },
+        { testId: "TC_D", toolName: "d", success: false, status: "handler-error", message: "no handler", duration: 0 },
+      ],
+    });
+
+    assert.match(md, /\| Skipped \| 1 \|/);
+    assert.match(md, /\| Handler errors \| 1 \|/);
+    assert.match(md, /\| Pass Rate \| 50\.0% \|/, "pass rate counts only tests that ran");
+    assert.match(md, /SKIPPED - TC_C/);
+    assert.match(md, /HANDLER ERROR - TC_D/);
+    assert.equal((md.match(/FAIL - /g) || []).length, 1, "only the real failure is marked FAIL");
+  });
+});
