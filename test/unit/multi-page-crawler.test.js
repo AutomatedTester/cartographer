@@ -18,7 +18,11 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 
-import { MultiPageCrawler } from "../../build/multi-page-crawler.js";
+import {
+  MultiPageCrawler,
+  CRAWL_DENY_LIST,
+  deniedReason,
+} from "../../build/multi-page-crawler.js";
 
 // The crawler narrates every page, element and queue transition to stderr. At
 // one line per element that buries the actual test output, including the
@@ -511,6 +515,11 @@ describe("MultiPageCrawler: failure handling", () => {
     ["script did not return", "analyze"],
     ["could not navigate to url", "navigate"],
     ["page load interrupted", "navigate"],
+    [
+      "Chrome could not load https://shop.test/: ERR_CONNECTION_REFUSED (the connection was refused). It showed its error page instead.",
+      "navigate",
+    ],
+    ["Chrome could not load https://shop.test/: ERR_TIMED_OUT (the request timed out)", "navigate"],
     ["failed to extract elements", "extract"],
     ["something else entirely", "unknown"],
   ];
@@ -876,5 +885,184 @@ describe("MultiPageCrawler: button navigation", () => {
 
     await crawler.crawl();
     assert.deepEqual(fake.requested.map((r) => r.url), ["https://shop.test/"]);
+  });
+});
+
+describe("MultiPageCrawler: deny-list for links and buttons", () => {
+  // A crawl with credentials must not sign itself out, and no crawl may
+  // delete, buy or submit anything on a real site just by exploring it.
+
+  /** A link element with the given target and text. */
+  function link(target, text = "Link", extra = {}) {
+    return {
+      path: "body > a",
+      tag: "a",
+      locator: "a",
+      text,
+      intentScore: 70,
+      intentReasons: ["a"],
+      navigates: true,
+      navigationTarget: target,
+      ...extra,
+    };
+  }
+
+  function homeWith(elements) {
+    return {
+      pages: {
+        "https://shop.test/": { title: "Home", consoleLogs: [], highIntentElements: elements },
+      },
+    };
+  }
+
+  const deniedUrls = [
+    "https://shop.test/logout",
+    "https://shop.test/log-out",
+    "https://shop.test/users/sign_out",
+    "https://shop.test/account/signOut",
+    "https://shop.test/session?action=logout",
+    "https://shop.test/items/5/delete",
+    "https://shop.test/cart/remove?id=3",
+    "https://shop.test/newsletter/unsubscribe",
+    "https://shop.test/account/deactivate",
+    "https://shop.test/buy-now/42",
+    "https://shop.test/place-order",
+  ];
+  for (const url of deniedUrls) {
+    it(`does not follow ${url}`, async () => {
+      const { crawler, fake } = build({}, homeWith([link(url), link("https://shop.test/about")]));
+      const result = await crawler.crawl();
+      assert.deepEqual(fake.requested.map((r) => r.url), [
+        "https://shop.test/",
+        "https://shop.test/about",
+      ]);
+      assert.equal(result.crawlErrors.length, 0, "a skipped link is not an error");
+    });
+  }
+
+  it("does not follow a harmless-looking url whose link text says log out", async () => {
+    const urls = await crawledUrls({}, homeWith([link("https://shop.test/session/end", "Log out")]));
+    assert.deepEqual(urls, ["https://shop.test/"]);
+  });
+
+  it("does not follow a link whose aria-label says delete", async () => {
+    const urls = await crawledUrls(
+      {},
+      homeWith([link("https://shop.test/x/9", "", { ariaLabel: "Delete item" })])
+    );
+    assert.deepEqual(urls, ["https://shop.test/"]);
+  });
+
+  it("still follows a plain /checkout page link, since loading a page buys nothing", async () => {
+    const urls = await crawledUrls({}, homeWith([link("https://shop.test/checkout", "Checkout")]));
+    assert.deepEqual(urls, ["https://shop.test/", "https://shop.test/checkout"]);
+  });
+
+  it("does not match words that merely contain a denied word", async () => {
+    const urls = await crawledUrls(
+      {},
+      homeWith([link("https://shop.test/blog/deleted-scenes", "Deleted scenes")])
+    );
+    assert.deepEqual(urls, ["https://shop.test/", "https://shop.test/blog/deleted-scenes"]);
+  });
+
+  it("logs each skipped link to stderr", async () => {
+    const lines = [];
+    console.error = (...args) => lines.push(args.join(" "));
+    await crawledUrls({}, homeWith([link("https://shop.test/logout", "Sign out")]));
+    assert.ok(
+      lines.some((l) => l.includes("[multi-page-crawler]") && /deny-list/i.test(l) && l.includes("/logout")),
+      "expected a [multi-page-crawler] deny-list line naming the url"
+    );
+  });
+
+  it("does not crawl a denied url discovered by clicking a button", async () => {
+    let currentUrl = "https://shop.test/";
+    let pendingUrl = null;
+    const driver = {
+      async findElement() {
+        return { click: async () => { pendingUrl = "https://shop.test/logout"; } };
+      },
+      async findElements() { return []; },
+      actions() {
+        return { move: () => ({ perform: async () => {} }), click: () => ({ perform: async () => {} }) };
+      },
+      async getCurrentUrl() {
+        const value = currentUrl;
+        if (pendingUrl) { currentUrl = pendingUrl; pendingUrl = null; }
+        return value;
+      },
+      async executeScript() { return null; },
+    };
+    const { crawler, fake } = build({}, { driver, ...homeWith([
+      { tag: "button", locator: "#menu", id: "menu", text: "Menu", intentScore: 80, intentReasons: [], navigates: true },
+    ]) });
+    await crawler.crawl();
+    assert.deepEqual(fake.requested.map((r) => r.url), ["https://shop.test/"]);
+  });
+
+  /** A driver that records every click and every JS lookup it is asked to do. */
+  function recordingDriver() {
+    const clicked = [];
+    const driver = {
+      async findElement(by) {
+        return { click: async () => { clicked.push(String(by.value ?? by)); } };
+      },
+      async findElements() { return []; },
+      actions() {
+        return { move: () => ({ perform: async () => {} }), click: () => ({ perform: async () => { clicked.push("actions"); } }) };
+      },
+      async getCurrentUrl() { return "https://shop.test/"; },
+      async executeScript() { return null; },
+    };
+    return { driver, clicked };
+  }
+
+  const deniedButtons = [
+    { id: "logout-btn", text: "Logout" },
+    { text: "Sign out" },
+    { ariaLabel: "Delete account" },
+    { text: "Place order" },
+    { text: "Buy now" },
+    { text: "Pay now" },
+    { text: "Checkout" },
+    { text: "Confirm" },
+    { text: "Unsubscribe" },
+    { text: "Close account" },
+    { text: "Cancel account" },
+  ];
+  for (const fields of deniedButtons) {
+    it(`never clicks a button described by ${JSON.stringify(fields)}`, async () => {
+      const { driver, clicked } = recordingDriver();
+      const { crawler } = build({}, { driver, ...homeWith([
+        { tag: "button", locator: "button", intentScore: 80, intentReasons: [], navigates: true, text: "", ...fields },
+      ]) });
+      const result = await crawler.crawl();
+      assert.deepEqual(clicked, [], "the button must not be clicked");
+      assert.equal(result.crawlErrors.length, 0);
+    });
+  }
+
+  it("still clicks an ordinary button", async () => {
+    const { driver, clicked } = recordingDriver();
+    const { crawler } = build({}, { driver, ...homeWith([
+      { tag: "button", locator: "#more", id: "more", text: "Show more", intentScore: 80, intentReasons: [], navigates: true },
+    ]) });
+    await crawler.crawl();
+    assert.ok(clicked.length > 0);
+  });
+
+  it("exposes the deny-list as one constant", () => {
+    assert.ok(Array.isArray(CRAWL_DENY_LIST.always));
+    assert.ok(Array.isArray(CRAWL_DENY_LIST.clickOnly));
+    assert.ok(CRAWL_DENY_LIST.always.includes("logout"));
+    assert.ok(CRAWL_DENY_LIST.clickOnly.includes("checkout"));
+  });
+
+  it("deniedReason separates following from clicking", () => {
+    assert.equal(deniedReason(["/checkout"], "follow"), null);
+    assert.equal(deniedReason(["Checkout"], "click"), "checkout");
+    assert.equal(deniedReason(["/account/sign-out"], "follow"), "sign out");
+    assert.equal(deniedReason(["Show more", undefined, ""], "click"), null);
   });
 });
