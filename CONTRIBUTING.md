@@ -140,11 +140,11 @@ Please contact maintainers privately if you witness unacceptable behavior.
    git checkout -b fix/issue-description
    ```
 
-3. **Install and build:**
+3. **Install and build** (Node.js 22 or later):
 
    ```bash
    npm install
-   npm run build
+   npm run build:all   # TypeScript + in-page analyzer bundle
    ```
 
 4. **Verify setup:**

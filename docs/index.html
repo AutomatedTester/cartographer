@@ -59,6 +59,22 @@
     </div>
   </section>
 
+  <section id="safety" aria-labelledby="safety-title">
+    <div class="wrap">
+      <div class="section-head">
+        <p class="eyebrow">Before you crawl</p>
+        <h2 id="safety-title">It drives a real browser against a real site</h2>
+      </div>
+      <ul style="margin:0;padding-left:20px;max-width:72ch;color:var(--ink-soft);line-height:1.7">
+        <li><strong>Only crawl sites you are authorised to test.</strong></li>
+        <li><strong>No rate limiting, and <code>robots.txt</code> is not read.</strong> Keep <code>maxPages</code> small on sites you don’t run.</li>
+        <li><strong>It clicks things.</strong> Multi-page crawls click buttons, and <code>run_critical_tests</code> clicks, types and submits forms. Use a test or staging site.</li>
+        <li><strong>Use a test account.</strong> Credentials are tool arguments, and they stay in your MCP client’s chat history.</li>
+        <li><strong>Fence off what must not be touched</strong> with <code>excludeUrlPatterns</code>. Log out, delete, unsubscribe and buy or pay links are skipped by default.</li>
+      </ul>
+    </div>
+  </section>
+
   <section id="how" aria-labelledby="how-title">
     <div class="wrap">
       <div class="section-head">
@@ -73,7 +89,7 @@
         </div>
         <div class="step">
           <h3>Analyse</h3>
-          <p>An analyser injected into each page reads the DOM and scores every interactive element with <code>all-MiniLM-L6-v2</code>, falling back to heuristics if the model can’t load.</p>
+          <p>An analyser injected into each page reads the DOM and scores every interactive element by rule, using <code>all-MiniLM-L6-v2</code> to merge near-duplicates when it loads and a heuristic scorer when it can’t.</p>
         </div>
         <div class="step">
           <h3>Connect</h3>
@@ -183,22 +199,22 @@
         <details class="tool">
           <summary><span class="n">01</span><span class="name">crawl_and_analyze</span><span class="desc">Crawl one URL, score its elements and generate test cases.</span><span class="chev">›</span></summary>
           <div class="body">
-            <p><code>format</code> is <code>markdown</code> (default), <code>json</code> or <code>markdown-summary</code>. <code>ariaAudit</code> adds the ARIA advisory to the result.</p>
-<pre><code>{ <span class="k">"url"</span>: <span class="s">"https://example.com"</span>, <span class="k">"format"</span>: <span class="s">"json"</span>, <span class="k">"ariaAudit"</span>: <span class="k">false</span> }</code></pre>
+            <p><code>format</code> is <code>markdown</code> (default), <code>markdown-summary</code> or <code>json</code>. <code>ariaAudit</code> adds the ARIA advisory to the result. A URL without a scheme gets <code>https://</code>.</p>
+<pre><code>{ <span class="k">"url"</span>: <span class="s">"https://example.com"</span>, <span class="k">"ariaAudit"</span>: <span class="k">false</span> }</code></pre>
           </div>
         </details>
         <details class="tool">
           <summary><span class="n">02</span><span class="name">get_element_locator</span><span class="desc">Find a stable CSS/XPath locator by describing the element.</span><span class="chev">›</span></summary>
           <div class="body">
-            <p>Looks up elements from the most recent crawl, matching by meaning as well as by shared words. Uses a local ~23 MB embedding model downloaded on first use; set <code>CARTOGRAPHER_SEMANTIC_LOCATOR=off</code> for keyword matching only.</p>
+            <p>Looks up elements on the page from the most recent <code>crawl_and_analyze</code>, and only that page, matching by meaning as well as by shared words. If nothing matches, it returns an error. Uses a local ~23 MB embedding model downloaded on first use; set <code>CARTOGRAPHER_SEMANTIC_LOCATOR=off</code> for keyword matching only.</p>
 <pre><code>{ <span class="k">"description"</span>: <span class="s">"the submit button in the login form"</span> }</code></pre>
           </div>
         </details>
         <details class="tool">
           <summary><span class="n">03</span><span class="name">run_critical_tests</span><span class="desc">Crawl afresh, then run the critical tests in the browser.</span><span class="chev">›</span></summary>
           <div class="body">
-            <p>Runs test cases with an intent score of 50 or more. Only <code>url</code> is required; <code>testIds</code> narrows the run and <code>retryCount</code> re-runs failures.</p>
-<pre><code>{ <span class="k">"url"</span>: <span class="s">"https://example.com"</span>, <span class="k">"testIds"</span>: [<span class="s">"test-1"</span>], <span class="k">"retryCount"</span>: 1 }</code></pre>
+            <p>Crawls the page once, then runs test cases with an intent score of 50 or more. It clicks, types and submits on the live page, so use a test site; tests tagged <code>destructive</code> are skipped. Only <code>url</code> is required; <code>testIds</code> narrows the run (an unknown ID returns an error listing the valid ones) and <code>retryCount</code> re-runs failures.</p>
+<pre><code>{ <span class="k">"url"</span>: <span class="s">"https://staging.example.com"</span>, <span class="k">"testIds"</span>: [<span class="s">"TC_BENCHMARKSHOP_BUTTON_3"</span>], <span class="k">"retryCount"</span>: 1 }</code></pre>
           </div>
         </details>
         <details class="tool">
@@ -211,12 +227,12 @@
         <details class="tool">
           <summary><span class="n">05</span><span class="name">crawl_multi_page</span><span class="desc">Crawl a whole site and detect workflows across pages.</span><span class="chev">›</span></summary>
           <div class="body">
-            <p>Breadth-first and same-site. <code>maxPages</code> 2–50 (default 10), <code>maxDepth</code> 1–5 (default 3). With <code>credentials</code> it signs in before crawling protected pages. Returns a <code>sessionId</code> kept for one hour.</p>
+            <p>Breadth-first and same-site. <code>maxPages</code> 2–50 (default 10), <code>maxDepth</code> 1–5 (default 3). With <code>credentials</code> for a test account it signs in before crawling protected pages; they are never echoed back. <code>excludeUrlPatterns</code> (regular expressions) keeps it away from URLs you name, and log out, delete, unsubscribe and buy or pay links are skipped by default. Returns Markdown (JSON is opt-in and very large) and a <code>sessionId</code> kept for one hour.</p>
 <pre><code>{
-  <span class="k">"startUrl"</span>: <span class="s">"https://example.com"</span>,
+  <span class="k">"startUrl"</span>: <span class="s">"https://staging.example.com"</span>,
   <span class="k">"maxPages"</span>: 10,
-  <span class="k">"workflowStrategy"</span>: <span class="s">"both"</span>,
-  <span class="k">"credentials"</span>: { <span class="k">"username"</span>: <span class="s">"user"</span>, <span class="k">"password"</span>: <span class="s">"secret"</span> }
+  <span class="k">"excludeUrlPatterns"</span>: [<span class="s">"/admin"</span>],
+  <span class="k">"credentials"</span>: { <span class="k">"username"</span>: <span class="s">"test-user"</span>, <span class="k">"password"</span>: <span class="s">"test-password"</span> }
 }</code></pre>
           </div>
         </details>
@@ -230,7 +246,7 @@
         <details class="tool">
           <summary><span class="n">07</span><span class="name">export_workflow_visualization</span><span class="desc">Export workflows as Markdown with flow diagrams.</span><span class="chev">›</span></summary>
           <div class="body">
-            <p><code>workflowIds</code> is optional (default: all). <code>format</code> is <code>individual</code>, <code>comparison</code> or <code>full</code> (default).</p>
+            <p><code>workflowIds</code> is optional (default: all) and takes names or IDs. <code>format</code> is <code>individual</code>, <code>comparison</code> or <code>full</code> (default).</p>
 <pre><code>{ <span class="k">"sessionId"</span>: <span class="s">"session_…"</span>, <span class="k">"format"</span>: <span class="s">"full"</span> }</code></pre>
           </div>
         </details>
@@ -243,7 +259,7 @@
       <div class="section-head">
         <p class="eyebrow">Get started</p>
         <h2 id="start-title">Running in five minutes</h2>
-        <p>You need Node.js 18 or later and Google Chrome. Selenium Manager fetches chromedriver for you.</p>
+        <p>You need Node.js 22 or later and Google Chrome. Selenium Manager fetches chromedriver for you on the first crawl.</p>
       </div>
       <div class="qs">
         <ol>
@@ -255,14 +271,16 @@ npm install</code></pre>
           </li>
           <li>
             <strong>Build</strong>
-            <p>The server injects <code>build/analyzer.browser.js</code> into every page it crawls, so build both.</p>
-<pre><code>npm run build &amp;&amp; npm run build:browser</code></pre>
+            <p>This builds the server and <code>build/analyzer.browser.js</code>, which the server injects into every page it crawls. You need both.</p>
+<pre><code>npm run build:all</code></pre>
           </li>
         </ol>
         <ol start="3">
           <li>
             <strong>Point your MCP client at it</strong>
-            <p>For Claude Desktop, add this to <code>claude_desktop_config.json</code>, using the absolute path to your clone.</p>
+            <p>For Claude Code:</p>
+<pre><code>claude mcp add cartographer -- node /path/to/cartographer/build/index.js</code></pre>
+            <p>For Claude Desktop, add this to <code>claude_desktop_config.json</code> and restart it. Use the absolute path to your clone.</p>
 <pre><code>{
   <span class="k">"mcpServers"</span>: {
     <span class="k">"cartographer"</span>: {
@@ -274,7 +292,8 @@ npm install</code></pre>
           </li>
           <li>
             <strong>Ask for a map</strong>
-            <p>“Crawl https://example.com and tell me what I should test first.”</p>
+            <p>“Crawl https://staging.example.com and tell me what I should test first.”</p>
+            <p>Your client starts the server. If you run <code>npm start</code> yourself, it waits silently for a client; that’s expected. The first crawls may score with heuristics while the in-page model downloads.</p>
           </li>
         </ol>
       </div>
