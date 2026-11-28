@@ -31,6 +31,28 @@ export class TestCaseGenerator {
     }
 
     /**
+     * Build a stable test ID containing only [A-Z0-9_].
+     *
+     * Page titles are free text ("BenchmarkShop | BenchmarkShop"), so they are
+     * reduced to upper-case alphanumeric words joined by single underscores,
+     * with immediately repeated words dropped. That turns the title above into
+     * BENCHMARKSHOP rather than BENCHMARKSHOP_|_BENCHMARKSHOP.
+     */
+    static buildTestId(pageTitle: string, tag: string, ordinal: number): string {
+        const words = (text: string): string[] =>
+            (text || "")
+                .toUpperCase()
+                .split(/[^A-Z0-9]+/)
+                .filter((w) => w.length > 0);
+
+        const titleWords = words(pageTitle).filter(
+            (w, i, all) => i === 0 || w !== all[i - 1]
+        );
+        const parts = ["TC", ...titleWords, ...words(tag), String(ordinal)];
+        return parts.join("_");
+    }
+
+    /**
      * Convert intent score (0-100) to priority level
      */
     private static getPriority(intentScore: number): TestPriority {
@@ -54,6 +76,7 @@ export class TestCaseGenerator {
         if (tag === "input" && ["email", "text", "password", "search"].includes(type))
             return "input";
         if (tag === "select") return "select";
+        if (tag === "form") return "submit";
         if (tag === "textarea") return "input";
         if (
             tag === "button" &&
@@ -82,7 +105,7 @@ export class TestCaseGenerator {
     ): GeneratedTestCase {
         const actionType = this.getActionType(el);
         const priority = this.getPriority(el.intentScore);
-        const id = `TC_${pageTitle.replace(/\s+/g, "_")}_${el.tag}_${index + 1}`.toUpperCase();
+        const id = this.buildTestId(pageTitle, el.tag, index + 1);
 
         // Generate element-specific test content
         let name: string;

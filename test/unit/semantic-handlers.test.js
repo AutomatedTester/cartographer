@@ -240,6 +240,49 @@ describe("generated submit handler", () => {
 
     assert.equal(button.clicks, 1);
   });
+
+  it("submits a <form> element itself instead of clicking it", async () => {
+    // A form with a navigation target used to be treated as a link; clicking
+    // a form does nothing, so the test always failed with a timeout.
+    const form = new HTMLFormElement("form");
+    const { tools } = install(
+      [element({ tag: "form", text: "Search", locator: "#search-form", navigationTarget: "/search" })],
+      { "#search-form": form }
+    );
+
+    const result = await tools.search();
+
+    assert.equal(form.submitted, 1);
+    assert.equal(result.success, true);
+  });
+});
+
+describe("SemanticHandlerGenerator.generateHandlerCodeForTools", () => {
+  it("registers handlers under exactly the given names", async () => {
+    const button = new HTMLElement("button");
+    const code = SemanticHandlerGenerator.generateHandlerCodeForTools([
+      { element: element({ text: "Add to Cart", locator: "#target" }), toolName: "addToCart2" },
+      { element: element({ text: "Products", locator: "#target" }), toolName: "products" },
+    ]);
+    const env = createEnvironment({ "#target": button });
+    const webmcp = installHandlers(code, env);
+
+    assert.deepEqual(Object.keys(webmcp.tools).sort(), ["addToCart2", "products"]);
+    assert.deepEqual(webmcp.registeredTools, ["addToCart2", "products"]);
+    const result = await webmcp.tools.addToCart2();
+    assert.equal(result.success, true);
+    assert.equal(button.clicks, 1);
+  });
+
+  it("can be injected again into the same page without breaking", () => {
+    const code = SemanticHandlerGenerator.generateHandlerCodeForTools([
+      { element: element(), toolName: "clickMe" },
+    ]);
+    const env = createEnvironment({});
+    installHandlers(code, env);
+    const webmcp = installHandlers(code, env);
+    assert.equal(typeof webmcp.tools.clickMe, "function");
+  });
 });
 
 describe("generated select handler", () => {
