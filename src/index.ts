@@ -29,6 +29,7 @@ import { SemanticToolGenerator } from "./webmcp-semantic-tools.js";
 import { MultiPageCrawler } from "./multi-page-crawler.js";
 import { SessionManager } from "./session-manager.js";
 import { WorkflowDetector } from "./workflow-detector.js";
+import { lookupWorkflow } from "./workflow-lookup.js";
 import { LocatorGenerator } from "./locator-generator.js";
 import { BrowserAnalysisPipeline } from "./browser-pipeline.js";
 import { SemanticMatcher, LOCATOR_MODEL_ENV, minSimilarityFromEnv } from "./semantic-matcher.js";
@@ -350,7 +351,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "get_workflow_by_name",
       description:
-        "Retrieve a specific detected workflow by name from a completed multi-page crawl session.",
+        "Retrieve one detected workflow from a completed multi-page crawl session, by name or by ID. Several workflows can share a name; a name lookup returns the highest-confidence one and lists the IDs of the others.",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -360,7 +361,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
           workflowName: {
             type: "string",
-            description: "Name of the workflow to retrieve (e.g., 'checkout_flow', 'login_flow', 'product_browsing_flow').",
+            description: "Name or ID of the workflow to retrieve (e.g., 'form_submission_flow', or an ID such as 'wf_form_…' from crawl_multi_page). Use the ID to pick one of several workflows that share a name.",
           },
         },
         required: ["sessionId", "workflowName"],
@@ -697,9 +698,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    const workflow = session.workflows.find((w) => w.name === workflowName);
-    if (!workflow) {
-      const availableWorkflows = session.workflows.map((w) => w.name).join(", ");
+    const match = lookupWorkflow(session.workflows, workflowName);
+
+    if (!match) {
+      const availableWorkflows = session.workflows.map((w) => `${w.name} (${w.id})`).join(", ");
       return {
         content: [
           {
@@ -711,14 +713,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: JSON.stringify(workflow, null, 2),
-        },
-      ],
-    };
+    const { workflow, others } = match;
+    const content = [
+      {
+        type: "text" as const,
+        text: JSON.stringify(workflow, null, 2),
+      },
+    ];
+    if (others.length > 0) {
+      content.push({
+        type: "text" as const,
+        text:
+          `${others.length + 1} workflows are named "${workflowName}"; returned the highest-confidence one. ` +
+          `Fetch the others by passing their ID as workflowName: ${others.map((w) => w.id).join(", ")}`,
+      });
+    }
+
+    return { content };
   }
 
   if (name === "export_workflow_visualization") {
@@ -866,7 +877,7 @@ function formatMultiPageCrawlMarkdown(result: MultiPageCrawlResult, sessionId: s
   markdown += `## Usage\n\n`;
   markdown += `To retrieve a specific workflow, use:\n`;
   markdown += `\`\`\`\n`;
-  markdown += `get_workflow_by_name(sessionId: "${sessionId}", workflowName: "<workflow_name>")\n`;
+  markdown += `get_workflow_by_name(sessionId: "${sessionId}", workflowName: "<workflow_name or ID>")\n`;
   markdown += `\`\`\`\n\n`;
 
   markdown += `To export workflow visualizations, use:\n`;
