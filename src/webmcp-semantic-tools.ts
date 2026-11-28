@@ -176,6 +176,7 @@ export class SemanticToolGenerator {
     if (tag === "input" && ["email", "text", "password", "search"].includes(type))
       return "input";
     if (tag === "select") return "select";
+    if (tag === "form") return "submit";
     if (tag === "textarea") return "input";
     if (tag === "button" && type === "submit") return "submit";
     if (tag === "a" || element.navigationTarget) return "navigate";

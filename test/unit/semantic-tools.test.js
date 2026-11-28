@@ -109,6 +109,7 @@ describe("SemanticToolGenerator action type inference", () => {
     { desc: "textarea", el: { tag: "textarea" }, expected: "input" },
     { desc: "select", el: { tag: "select" }, expected: "select" },
     { desc: "submit button", el: { tag: "button", attributes: { type: "submit" } }, expected: "submit" },
+    { desc: "form with a navigation target", el: { tag: "form", navigationTarget: "/search" }, expected: "submit" },
     { desc: "anchor", el: { tag: "a" }, expected: "navigate" },
     { desc: "any element with a navigation target", el: { tag: "div", navigationTarget: "/next" }, expected: "navigate" },
     { desc: "checkbox role", el: { tag: "div", role: "checkbox" }, expected: "click" },

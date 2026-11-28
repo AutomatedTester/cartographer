@@ -16,15 +16,28 @@ export class SemanticHandlerGenerator {
   static generateHandlerCode(elements: HighIntentElement[]): string {
     const criticalElements = SemanticToolGenerator.selectCritical(elements);
     const toolNames = SemanticToolGenerator.generateUniqueToolNames(criticalElements);
-    const toolSchemas = SemanticToolGenerator.generate(elements);
+    return this.generateHandlerCodeForTools(
+      criticalElements.map((element, i) => ({ element, toolName: toolNames[i] }))
+    );
+  }
 
-    // Generate individual handler functions
-    const handlerFunctions = criticalElements
-      .map((el, i) => this.generateHandlerFunction(el, toolNames[i]))
+  /**
+   * Generate registration code for explicit (element, tool name) pairs.
+   *
+   * TestExecutor uses this to re-register handlers on a freshly loaded page
+   * under exactly the names its test cases reference. Handlers live in page
+   * JavaScript, so any navigation (a link click, a form submit) wipes them;
+   * without re-registration every test after the first navigation reports
+   * "Tool not found".
+   */
+  static generateHandlerCodeForTools(
+    tools: Array<{ element: HighIntentElement; toolName: string }>
+  ): string {
+    const handlerFunctions = tools
+      .map(({ element, toolName }) => this.generateHandlerFunction(element, toolName))
       .join("\n\n");
 
-    // Generate the tool registration code
-    const registrationCode = `
+    return `
 // Initialize navigator.webmcp if not already present
 if (!navigator.webmcp) {
   navigator.webmcp = {};
@@ -38,15 +51,11 @@ ${handlerFunctions}
 
 // Export tool names for verification
 navigator.webmcp.registeredTools = [
-  ${toolSchemas
-    .map((schema) => this.jsLiteral(schema.name))
-    .join(",\n  ")}
+  ${tools.map(({ toolName }) => this.jsLiteral(toolName)).join(",\n  ")}
 ];
 
 console.log('[webmcp] Registered tools:', navigator.webmcp.registeredTools);
 `;
-
-    return registrationCode;
   }
 
   /**
@@ -256,6 +265,8 @@ navigator.webmcp.tools[${this.jsLiteral(toolName)}] = async function(params = {}
     if (tag === "input" && ["email", "text", "password", "search"].includes(type))
       return "input";
     if (tag === "select") return "select";
+    // Clicking a <form> element does nothing; the meaningful action is submit.
+    if (tag === "form") return "submit";
     if (tag === "textarea") return "input";
     if (tag === "button" && type === "submit") return "submit";
     if (tag === "a" || element.navigationTarget) return "navigate";
