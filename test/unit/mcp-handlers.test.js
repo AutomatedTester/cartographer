@@ -19,12 +19,18 @@ import assert from "node:assert/strict";
 
 import { startInProcessServer, textOf } from "../helpers/mcp-harness.js";
 
+// Keyword matching only: no embedding model download in a unit test. The
+// server reads this when build/index.js is first imported, in before() below.
+process.env.CARTOGRAPHER_SEMANTIC_LOCATOR = "off";
+
 let server;
 let client;
+let testing;
 
 before(async () => {
   server = await startInProcessServer();
   client = server.client;
+  ({ __testing: testing } = await import("../../build/index.js"));
 });
 
 after(async () => {
@@ -126,10 +132,14 @@ describe("MCP handlers: ARIA advisory is opt-in", () => {
   });
 
   it("validates audit_aria arguments before starting a browser", async () => {
-    await assert.rejects(() => call("audit_aria", {}));
-    await assert.rejects(() => call("audit_aria", { url: "not a url" }));
-    await assert.rejects(() => call("audit_aria", { url: "https://x.test/", format: "pdf" }));
-    await assert.rejects(() => call("crawl_and_analyze", { url: "https://x.test/", ariaAudit: "yes" }));
+    for (const args of [{}, { url: "not a url" }, { url: "https://x.test/", format: "pdf" }]) {
+      const result = await call("audit_aria", args);
+      assert.equal(result.isError, true, JSON.stringify(args));
+      assert.match(textOf(result), /^Invalid arguments: /);
+    }
+    const result = await call("crawl_and_analyze", { url: "https://x.test/", ariaAudit: "yes" });
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /ariaAudit/);
   });
 });
 
@@ -141,19 +151,41 @@ describe("MCP handlers: argument validation", () => {
     assert.match(textOf(result), /Unknown tool/);
   });
 
-  it("rejects a missing required argument", async () => {
-    await assert.rejects(() => call("crawl_and_analyze", {}));
+  it("rejects a missing required argument as an error result", async () => {
+    const result = await call("crawl_and_analyze", {});
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /^Invalid arguments: url: /);
   });
 
-  it("rejects an argument of the wrong type", async () => {
-    await assert.rejects(() => call("crawl_and_analyze", { url: 42 }));
-    await assert.rejects(() => call("crawl_multi_page", { startUrl: ["a"] }));
+  it("rejects an argument of the wrong type as an error result", async () => {
+    for (const [tool, args] of [
+      ["crawl_and_analyze", { url: 42 }],
+      ["crawl_multi_page", { startUrl: ["a"] }],
+      ["run_critical_tests", { url: "https://x.test/", retryCount: "two" }],
+      ["get_element_locator", { description: "" }],
+    ]) {
+      const result = await call(tool, args);
+      assert.equal(result.isError, true, `${tool} ${JSON.stringify(args)}`);
+      assert.match(textOf(result), /^Invalid arguments: /);
+    }
   });
 
-  it("rejects an out-of-enum format", async () => {
-    await assert.rejects(() =>
-      call("export_workflow_visualization", { sessionId: "x", format: "pdf" })
-    );
+  it("gives a one-line, readable validation message rather than raw Zod JSON", async () => {
+    const result = await call("audit_aria", { url: "not a url" });
+
+    assert.equal(textOf(result), "Invalid arguments: url: A valid URL is required.");
+  });
+
+  it("rejects an out-of-enum format as an error result", async () => {
+    const result = await call("export_workflow_visualization", { sessionId: "x", format: "pdf" });
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /format/);
+  });
+
+  it("requires startUrl or url on crawl_multi_page", async () => {
+    const result = await call("crawl_multi_page", {});
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /startUrl or url/);
   });
 
   it("accepts every documented format value", async () => {
@@ -197,8 +229,11 @@ describe("MCP handlers: state-dependent tools before any crawl", () => {
   });
 
   it("get_workflow_by_name requires both arguments", async () => {
-    await assert.rejects(() => call("get_workflow_by_name", { sessionId: "x" }));
-    await assert.rejects(() => call("get_workflow_by_name", { workflowName: "x" }));
+    for (const args of [{ sessionId: "x" }, { workflowName: "x" }]) {
+      const result = await call("get_workflow_by_name", args);
+      assert.equal(result.isError, true);
+      assert.match(textOf(result), /^Invalid arguments: /);
+    }
   });
 
   it("export_workflow_visualization reports an unknown session", async () => {
@@ -219,9 +254,170 @@ describe("MCP handlers: state-dependent tools before any crawl", () => {
   });
 });
 
+describe("MCP handlers: schemas agents can rely on", () => {
+  async function schemaOf(name) {
+    const { tools } = await client.listTools();
+    return tools.find((t) => t.name === name);
+  }
+
+  it("defaults every format to markdown", async () => {
+    for (const name of ["crawl_and_analyze", "audit_aria", "run_critical_tests", "crawl_multi_page"]) {
+      const tool = await schemaOf(name);
+      assert.equal(tool.inputSchema.properties.format.default, "markdown", name);
+      assert.ok(tool.inputSchema.properties.format.enum.includes("json"), `${name} keeps json`);
+    }
+  });
+
+  it("declares integer parameters as integers with the enforced bounds", async () => {
+    const multi = (await schemaOf("crawl_multi_page")).inputSchema.properties;
+    const expected = {
+      maxPages: [2, 50],
+      maxDepth: [1, 5],
+      pageLoadTimeout: [5000, 180000],
+      scriptTimeoutMs: [10000, 300000],
+      analysisTimeoutMs: [5000, 240000],
+      modelLoadTimeoutMs: [1000, 120000],
+    };
+    for (const [key, [min, max]] of Object.entries(expected)) {
+      assert.equal(multi[key].type, "integer", key);
+      assert.equal(multi[key].minimum, min, `${key} minimum`);
+      assert.equal(multi[key].maximum, max, `${key} maximum`);
+    }
+
+    const retry = (await schemaOf("run_critical_tests")).inputSchema.properties.retryCount;
+    assert.equal(retry.type, "integer");
+    assert.equal(retry.minimum, 0);
+  });
+
+  it("accepts url as an alias for startUrl on crawl_multi_page", async () => {
+    const tool = await schemaOf("crawl_multi_page");
+    assert.ok("url" in tool.inputSchema.properties);
+    assert.ok("startUrl" in tool.inputSchema.properties);
+  });
+
+  it("offers excludeUrlPatterns on crawl_multi_page", async () => {
+    const prop = (await schemaOf("crawl_multi_page")).inputSchema.properties.excludeUrlPatterns;
+    assert.equal(prop.type, "array");
+    assert.equal(prop.items.type, "string");
+    assert.match(prop.description, /never visited/);
+  });
+
+  it("rejects an excludeUrlPatterns entry that is not a valid regular expression", async () => {
+    const result = await call("crawl_multi_page", { url: "https://x.test/", excludeUrlPatterns: ["("] });
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /^Invalid arguments: excludeUrlPatterns/);
+  });
+
+  it("states side effects and cost in the descriptions", async () => {
+    assert.match((await schemaOf("crawl_and_analyze")).description, /headless Chrome/);
+    assert.match((await schemaOf("run_critical_tests")).description, /staging/);
+    const multi = await schemaOf("crawl_multi_page");
+    assert.match(multi.description, /test account/);
+    assert.match(multi.description, /minutes/);
+    assert.match(multi.inputSchema.properties.credentials.description, /not returned in the output/);
+  });
+
+  it("says get_element_locator uses only the last crawl_and_analyze page", async () => {
+    const tool = await schemaOf("get_element_locator");
+    assert.match(tool.description, /crawl_and_analyze/);
+    assert.match(tool.description, /not crawl_multi_page/);
+  });
+});
+
+describe("MCP handlers: get_element_locator results", () => {
+  const page = {
+    url: "https://shop.test/login",
+    title: "Login",
+    consoleLogs: [],
+    highIntentElements: [
+      {
+        path: "form > button",
+        tag: "button",
+        id: "login-submit",
+        text: "Sign in",
+        locator: "#login-submit",
+        intentReasons: ["submit"],
+        intentScore: 80,
+        attributes: { type: "submit" },
+      },
+    ],
+  };
+
+  after(() => testing.setLastAnalysis(null));
+
+  it("reports no match as an error naming the page and description, without returning *", async () => {
+    testing.setLastAnalysis(page);
+    const result = await call("get_element_locator", { description: "zebra giraffe" });
+
+    assert.equal(result.isError, true);
+    assert.equal(textOf(result), 'No element on https://shop.test/login matched "zebra giraffe".');
+  });
+
+  it("names the page the locator came from", async () => {
+    testing.setLastAnalysis(page);
+    const result = await call("get_element_locator", { description: "sign in button" });
+
+    assert.notEqual(result.isError, true);
+    assert.match(textOf(result), /Page: https:\/\/shop\.test\/login/);
+    assert.match(textOf(result), /login-submit/);
+  });
+});
+
+describe("MCP handlers: workflows by name or ID", () => {
+  const workflow = (id, name, confidence) => ({
+    id,
+    name,
+    pageSequence: ["https://x.test/"],
+    actionSequence: [],
+    stateTransitions: [],
+    confidence,
+    tags: ["form"],
+  });
+
+  before(() => {
+    testing.storeSession("seeded", {
+      sessionId: "seeded",
+      startUrl: "https://x.test/",
+      pages: [],
+      metadata: { startTime: 0, totalPages: 0, totalElementsAnalyzed: 0, totalHighIntentElements: 0 },
+      sessionState: {},
+      workflows: [workflow("wf_a", "checkout_flow", 80), workflow("wf_b", "login_flow", 70)],
+    });
+  });
+
+  it("get_workflow_by_name finds a workflow by ID", async () => {
+    const result = await call("get_workflow_by_name", { sessionId: "seeded", workflowName: "wf_b" });
+    assert.notEqual(result.isError, true);
+    assert.match(textOf(result), /login_flow/);
+  });
+
+  it("export_workflow_visualization accepts workflow names as well as IDs", async () => {
+    const result = await call("export_workflow_visualization", {
+      sessionId: "seeded",
+      workflowIds: ["checkout_flow"],
+      format: "individual",
+    });
+    assert.notEqual(result.isError, true);
+    assert.match(textOf(result), /checkout_flow/);
+    assert.doesNotMatch(textOf(result), /login_flow/);
+  });
+
+  it("export_workflow_visualization lists what is available when nothing matches", async () => {
+    const result = await call("export_workflow_visualization", {
+      sessionId: "seeded",
+      workflowIds: ["nope"],
+    });
+    assert.equal(result.isError, true);
+    const text = textOf(result);
+    assert.match(text, /nope/);
+    assert.match(text, /checkout_flow \(wf_a\)/);
+    assert.match(text, /login_flow \(wf_b\)/);
+  });
+});
+
 describe("MCP handlers: resilience", () => {
   it("stays responsive after a rejected call", async () => {
-    await call("crawl_and_analyze", {}).catch(() => {});
+    await call("crawl_and_analyze", {});
 
     const { tools } = await client.listTools();
     assert.ok(tools.length > 0, "server still answers after a bad request");

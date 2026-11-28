@@ -104,14 +104,33 @@ function evictExpiredSessions(): void {
 // Input schemas (validated with Zod)
 // ---------------------------------------------------------------------------
 
+/** A URL, with https:// added when the caller left the scheme off. */
+const UrlInput = z
+  .string()
+  .transform((url) => normalizeUrl(url))
+  .pipe(z.string().url({ message: "A valid URL is required." }));
+
+/** A regular expression source string; rejected up front if it will not compile. */
+const RegexInput = z.string().refine(
+  (pattern) => {
+    try {
+      new RegExp(pattern);
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  (pattern) => ({ message: `Not a valid regular expression: ${pattern}` })
+);
+
 const CrawlAndAnalyzeInput = z.object({
-  url: z.string().url({ message: "A valid URL is required." }),
+  url: UrlInput,
   format: z.enum(["json", "markdown", "markdown-summary"]).optional().default("markdown"),
   ariaAudit: z.boolean().optional().default(false),
 });
 
 const AuditAriaInput = z.object({
-  url: z.string().url({ message: "A valid URL is required." }),
+  url: UrlInput,
   format: z.enum(["json", "markdown"]).optional().default("markdown"),
 });
 
@@ -122,14 +141,28 @@ const GetElementLocatorInput = z.object({
 });
 
 const RunCriticalTestsInput = z.object({
-  url: z.string().url({ message: "A valid URL is required." }),
+  url: UrlInput,
   testIds: z.array(z.string()).optional(),
   retryCount: z.number().int().min(0).default(0).optional(),
-  format: z.enum(["json", "markdown"]).optional().default("json"),
+  format: z.enum(["json", "markdown"]).optional().default("markdown"),
 });
 
-const CrawlMultiPageInput = z.object({
-  startUrl: z.string().transform((url) => normalizeUrl(url)).pipe(z.string().url({ message: "A valid URL is required." })),
+// `url` is accepted as an alias for `startUrl`, so callers can use the same
+// argument name as every other crawling tool.
+const CrawlMultiPageInput = z.preprocess((args) => {
+  if (args && typeof args === "object" && !Array.isArray(args)) {
+    const { url, ...rest } = args as Record<string, unknown>;
+    if (rest.startUrl === undefined && url !== undefined) {
+      return { ...rest, startUrl: url };
+    }
+    return rest;
+  }
+  return args;
+}, z.object({
+  startUrl: z
+    .string({ required_error: "startUrl or url is required." })
+    .transform((url) => normalizeUrl(url))
+    .pipe(z.string().url({ message: "A valid URL is required." })),
   maxPages: z.number().int().min(2).max(50).optional().default(10),
   maxDepth: z.number().int().min(1).max(5).optional().default(3),
   pageLoadTimeout: z.number().int().min(5000).max(180000).optional().default(30000),
@@ -143,8 +176,9 @@ const CrawlMultiPageInput = z.object({
     username: z.string().min(1, { message: "Username is required." }),
     password: z.string().min(1, { message: "Password is required." }),
   }).optional(),
-  format: z.enum(["json", "markdown"]).optional().default("json"),
-});
+  excludeUrlPatterns: z.array(RegexInput).optional(),
+  format: z.enum(["json", "markdown"]).optional().default("markdown"),
+}));
 
 const GetWorkflowByNameInput = z.object({
   sessionId: z.string().min(1, { message: "Session ID is required." }),
@@ -172,18 +206,19 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "crawl_and_analyze",
       description:
-        "Crawl a web page with Selenium and use a local ML model to identify brittle elements and auto-generate test cases.",
+        "Crawl a web page with Selenium and use a local ML model to identify brittle elements and auto-generate test cases. " +
+        "Loads the page in headless Chrome and takes about 10–20 seconds.",
       inputSchema: {
         type: "object" as const,
         properties: {
           url: {
             type: "string",
-            description: "The fully-qualified URL to crawl (e.g. https://example.com).",
+            description: "The URL to crawl (e.g. https://example.com). https:// is added when the scheme is left off.",
           },
           format: {
             type: "string",
             enum: ["json", "markdown", "markdown-summary"],
-            description: "Output format: 'json' for structured data, 'markdown' for full report with test cases, 'markdown-summary' for concise list",
+            description: "Output format: 'markdown' for the full report with test cases (default), 'markdown-summary' for a concise list, 'json' for structured data.",
             default: "markdown",
           },
           ariaAudit: {
@@ -204,7 +239,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           url: {
             type: "string",
-            description: "The fully-qualified URL to review (e.g. https://example.com).",
+            description: "The URL to review (e.g. https://example.com). https:// is added when the scheme is left off.",
           },
           format: {
             type: "string",
@@ -219,7 +254,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "get_element_locator",
       description:
-        "Return the most stable CSS or XPath locator for an element described in natural language, based on the most recent crawl.",
+        "Return the most stable CSS or XPath locator for an element described in natural language. " +
+        "Uses only the page from the most recent crawl_and_analyze call (not crawl_multi_page or run_critical_tests), and names that page in the result.",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -234,29 +270,31 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "run_critical_tests",
       description:
-        "Run critical tests on a website by executing semantic webmcp tools in the browser. Only tests with intent score >= 50 are executed.",
+        "Run critical tests on a website by executing semantic webmcp tools in the browser. Only tests with intent score >= 50 are executed. " +
+        "Clicks, types into and submits elements on the live page, including add-to-cart or form submits; run it against test or staging sites.",
       inputSchema: {
         type: "object" as const,
         properties: {
           url: {
             type: "string",
-            description: "The fully-qualified URL to test (e.g. https://example.com).",
+            description: "The URL to test (e.g. https://example.com). https:// is added when the scheme is left off.",
           },
           testIds: {
             type: "array",
             items: { type: "string" },
-            description: "Optional. Specific test IDs to run. If omitted, all critical tests are executed.",
+            description: "Optional. Specific critical test IDs to run. If omitted, all critical tests are executed. Unknown IDs are reported with the available ones.",
           },
           retryCount: {
-            type: "number",
+            type: "integer",
             description: "Number of times to retry failed tests (default: 0).",
             default: 0,
+            minimum: 0,
           },
           format: {
             type: "string",
             enum: ["json", "markdown"],
-            description: "Output format for results (default: json).",
-            default: "json",
+            description: "Output format for results: 'markdown' (default) or 'json'.",
+            default: "markdown",
           },
         },
         required: ["url"],
@@ -265,47 +303,65 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "crawl_multi_page",
       description:
-        "Crawl multiple pages of a website starting from a URL, detect user workflows (e.g., checkout, registration, login flows), and automatically handle login forms if credentials are provided.",
+        "Crawl multiple pages of a website starting from a URL, detect user workflows (e.g., checkout, registration, login flows), and automatically handle login forms if credentials are provided. " +
+        "Follows links and clicks buttons on the site and signs in when credentials are given; use a test account. Can take minutes for many pages.",
       inputSchema: {
         type: "object" as const,
         properties: {
           startUrl: {
             type: "string",
-            description: "The fully-qualified starting URL (e.g. https://example.com).",
+            description: "The starting URL (e.g. https://example.com). https:// is added when the scheme is left off. Give this or url.",
+          },
+          url: {
+            type: "string",
+            description: "Alias for startUrl, matching the other crawling tools. Give this or startUrl.",
           },
           maxPages: {
-            type: "number",
+            type: "integer",
             description: "Maximum number of pages to crawl (2-50, default: 10).",
             default: 10,
             minimum: 2,
             maximum: 50,
           },
           maxDepth: {
-            type: "number",
+            type: "integer",
             description: "Maximum depth from start URL (1-5, default: 3).",
             default: 3,
             minimum: 1,
             maximum: 5,
           },
           pageLoadTimeout: {
-            type: "number",
-            description: "Page load timeout in milliseconds (default: 30000).",
+            type: "integer",
+            description: "Page load timeout in milliseconds (5000-180000, default: 30000).",
             default: 30000,
+            minimum: 5000,
+            maximum: 180000,
           },
           scriptTimeoutMs: {
-            type: "number",
-            description: "Selenium async script timeout in milliseconds (default: 120000).",
+            type: "integer",
+            description: "Selenium async script timeout in milliseconds (10000-300000, default: 120000).",
             default: 120000,
+            minimum: 10000,
+            maximum: 300000,
           },
           analysisTimeoutMs: {
-            type: "number",
-            description: "In-browser analyzer watchdog timeout in milliseconds (default: 90000).",
+            type: "integer",
+            description: "In-browser analyzer watchdog timeout in milliseconds (5000-240000, default: 90000).",
             default: 90000,
+            minimum: 5000,
+            maximum: 240000,
           },
           modelLoadTimeoutMs: {
-            type: "number",
-            description: "ML model initialization timeout before heuristic fallback (default: 5000).",
+            type: "integer",
+            description: "ML model initialization timeout in milliseconds before heuristic fallback (1000-120000, default: 5000).",
             default: 5000,
+            minimum: 1000,
+            maximum: 120000,
+          },
+          excludeUrlPatterns: {
+            type: "array",
+            items: { type: "string" },
+            description: "Regular expressions; matching URLs are never visited. Use to keep the crawl away from logout, delete or admin pages.",
           },
           detectWorkflows: {
             type: "boolean",
@@ -325,7 +381,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           },
           credentials: {
             type: "object",
-            description: "Login credentials for sites behind authentication. When provided, crawler will auto-detect login forms and authenticate before crawling protected pages.",
+            description: "Login credentials for sites behind authentication. When provided, crawler will auto-detect login forms and authenticate before crawling protected pages. Use a test account. Credentials are used to sign in and are not returned in the output.",
             properties: {
               username: {
                 type: "string",
@@ -341,11 +397,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           format: {
             type: "string",
             enum: ["json", "markdown"],
-            description: "Output format: 'json' for structured data or 'markdown' for readable report (default: json).",
-            default: "json",
+            description: "Output format: 'markdown' for a readable report (default) or 'json' for structured data. JSON includes every page's elements and can run to hundreds of thousands of characters.",
+            default: "markdown",
           },
         },
-        required: ["startUrl"],
+        // startUrl or its alias url is required; checked when the call is made.
+        required: [],
       },
     },
     {
@@ -370,7 +427,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: "export_workflow_visualization",
       description:
-        "Export detected workflows from a multi-page crawl session as readable markdown visualizations showing page sequences, actions, and flow diagrams.",
+        "Export detected workflows from a multi-page crawl session as readable markdown visualizations showing page sequences, actions, and flow diagrams. Workflows can be picked by name or by ID.",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -381,7 +438,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
           workflowIds: {
             type: "array",
             items: { type: "string" },
-            description: "Optional. Specific workflow IDs to export. If omitted, all workflows are exported.",
+            description: "Optional. Workflow names or IDs to export (either works; a name selects every workflow with that name). If omitted, all workflows are exported.",
           },
           format: {
             type: "string",
@@ -396,10 +453,43 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
   ],
 }));
 
-// Handle tool calls
+/** A tool result carrying a single text message. */
+type ToolResult = {
+  content: { type: "text"; text: string }[];
+  isError?: boolean;
+};
+
+function errorResult(text: string): ToolResult {
+  return { content: [{ type: "text" as const, text }], isError: true };
+}
+
+/** One line naming each bad argument, e.g. "url: A valid URL is required." */
+function describeZodError(error: z.ZodError): string {
+  return error.issues
+    .map((issue) => (issue.path.length > 0 ? `${issue.path.join(".")}: ${issue.message}` : issue.message))
+    .join("; ");
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+// Handle tool calls. Every failure, bad arguments included, comes back as a
+// result with isError set, so the calling agent sees a readable message
+// instead of a protocol error.
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
+  try {
+    return await handleToolCall(name, args);
+  } catch (error) {
+    if (error instanceof z.ZodError) {
+      return errorResult(`Invalid arguments: ${describeZodError(error)}`);
+    }
+    return errorResult(`${name} failed: ${errorMessage(error)}`);
+  }
+});
 
+async function handleToolCall(name: string, args: unknown): Promise<ToolResult> {
   if (name === "crawl_and_analyze") {
     const { url, format, ariaAudit } = CrawlAndAnalyzeInput.parse(args);
 
@@ -408,8 +498,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       lastAnalysis = await crawler.crawlAndAnalyze(url, 25, { ariaAudit });
       // Load the locator model now, so the first lookup does not wait for it.
       semanticMatcher?.warmUp();
+    } catch (error) {
+      return errorResult(`Crawl of ${url} failed: ${errorMessage(error)}`);
     } finally {
-      await crawler.close();
+      await crawler.close().catch(() => {});
     }
 
     // Format output based on user preference
@@ -499,12 +591,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const locator = locatorGen.generateLocator(description, allElements, similarities);
 
     const matchedBy = locator.matchedBy ?? "none";
+    // A miss comes back as selector "*", which matches every element; never
+    // hand that out as if it were a locator.
+    if (locator.selector === "*" || matchedBy === "none" || locator.confidence === 0) {
+      return errorResult(`No element on ${lastAnalysis.url} matched "${description}".`);
+    }
+
     const mode = similarities ? "semantic + keyword" : "keyword only";
     return {
       content: [
         {
           type: "text" as const,
           text:
+            `Page: ${lastAnalysis.url}\n` +
             `Locator: ${locator.selector}\nType: ${locator.type}\n` +
             `Confidence: ${(locator.confidence * 100).toFixed(0)}%\nReason: ${locator.reason}\n` +
             `Matched by: ${matchedBy} (${mode})`,
@@ -516,50 +615,56 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   if (name === "run_critical_tests") {
     const { url, testIds, retryCount, format } = RunCriticalTestsInput.parse(args);
 
-    let analysis: AnalysisResult;
+    // One crawl serves both purposes: its analysis picks the tests, and the
+    // browser it leaves open (with handlers injected) runs them.
+    const testCrawler = new SiteCrawler();
     try {
-      await crawler.init();
-      analysis = await crawler.crawlAndAnalyze(url);
-    } finally {
-      await crawler.close();
-    }
-
-    // Filter to critical tests
-    const criticalTests = (analysis.generatedTestCases || []).filter(
-      (t) => t.priority === "critical" && t.semanticTool
-    );
-
-    // Further filter by testIds if provided
-    const testsToRun = testIds
-      ? criticalTests.filter((t) => testIds.includes(t.id))
-      : criticalTests;
-
-    if (testsToRun.length === 0) {
-      return {
-        content: [
-          {
-            type: "text" as const,
-            text: "No critical tests found to execute.",
-          },
-        ],
-      };
-    }
-
-    let output: string;
-    try {
-      // Create a new crawler instance for test execution
-      const testCrawler = new SiteCrawler();
-      await testCrawler.init();
-
+      let analysis: AnalysisResult;
       try {
-        // Re-crawl to get a fresh browser with injected handlers
-        const crawlResult = await testCrawler.crawlAndAnalyze(url);
+        await testCrawler.init();
+        analysis = await testCrawler.crawlAndAnalyze(url);
+      } catch (error) {
+        return errorResult(`Crawl of ${url} failed: ${errorMessage(error)}`);
+      }
+
+      // Filter to critical tests
+      const criticalTests = (analysis.generatedTestCases || []).filter(
+        (t) => t.priority === "critical" && t.semanticTool
+      );
+
+      if (criticalTests.length === 0) {
+        return {
+          content: [
+            {
+              type: "text" as const,
+              text: `No critical tests were generated for ${url}, so nothing was run.`,
+            },
+          ],
+        };
+      }
+
+      // Further filter by testIds if provided
+      let testsToRun = criticalTests;
+      if (testIds) {
+        const known = new Set(criticalTests.map((t) => t.id));
+        const unknown = testIds.filter((id) => !known.has(id));
+        if (unknown.length > 0) {
+          return errorResult(
+            `Unknown test IDs: ${unknown.join(", ")}. ` +
+            `Available critical test IDs: ${criticalTests.map((t) => t.id).join(", ")}`
+          );
+        }
+        testsToRun = criticalTests.filter((t) => testIds.includes(t.id));
+      }
+
+      let output: string;
+      try {
         const driver = testCrawler.getDriver();
         if (!driver) throw new Error("WebDriver not available after crawl");
         const executor = new TestExecutor(driver);
 
         // Get semantic tool schemas
-        const semanticTools = SemanticToolGenerator.generate(crawlResult.highIntentElements);
+        const semanticTools = SemanticToolGenerator.generate(analysis.highIntentElements);
 
         // Execute tests
         const summary: TestExecutionSummary = await executor.executeTests(
@@ -575,21 +680,21 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           // Markdown format
           output = formatTestResultsMarkdown(summary);
         }
-      } finally {
-        await testCrawler.close();
+      } catch (error) {
+        return errorResult(`Test execution failed: ${errorMessage(error)}`);
       }
-    } catch (error) {
-      output = `Test execution failed: ${error instanceof Error ? error.message : String(error)}`;
-    }
 
-    return {
-      content: [
-        {
-          type: "text" as const,
-          text: output,
-        },
-      ],
-    };
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: output,
+          },
+        ],
+      };
+    } finally {
+      await testCrawler.close().catch(() => {});
+    }
   }
 
   if (name === "crawl_multi_page") {
@@ -605,6 +710,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       workflowStrategy,
       enableAutoLogin,
       credentials,
+      excludeUrlPatterns,
       format,
     } = CrawlMultiPageInput.parse(args);
 
@@ -613,14 +719,17 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         startUrl,
         maxPages,
         maxDepth,
-          pageLoadTimeout,
-          scriptTimeoutMs,
-          analysisTimeoutMs,
-          modelLoadTimeoutMs,
+        pageLoadTimeout,
+        scriptTimeoutMs,
+        analysisTimeoutMs,
+        modelLoadTimeoutMs,
         detectWorkflows,
         workflowStrategy,
         enableAutoLogin,
         credentials,
+        ...(excludeUrlPatterns && excludeUrlPatterns.length > 0
+          ? { urlPatterns: { exclude: excludeUrlPatterns } }
+          : {}),
       });
 
       // If credentials provided, store them in session state for login handler
@@ -748,17 +857,23 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
-    // Filter workflows if specific IDs provided
+    // Filter workflows if specific names or IDs provided
     const workflowsToExport = workflowIds
-      ? session.workflows.filter((w) => workflowIds.includes(w.id))
+      ? session.workflows.filter((w) => workflowIds.some((x) => w.name === x || w.id === x))
       : session.workflows;
 
     if (workflowsToExport.length === 0) {
+      if (workflowIds) {
+        const available = session.workflows.map((w) => `${w.name} (${w.id})`).join(", ");
+        return errorResult(
+          `No workflow matched ${workflowIds.join(", ")}. Available workflows: ${available || "none"}`
+        );
+      }
       return {
         content: [
           {
             type: "text" as const,
-            text: `No workflows found matching the criteria.`,
+            text: `Session ${sessionId} has no detected workflows to export.`,
           },
         ],
       };
@@ -792,7 +907,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     content: [{ type: "text" as const, text: `Unknown tool: ${name}` }],
     isError: true,
   };
-});
+}
 
 function formatTestResultsMarkdown(summary: TestExecutionSummary): string {
   const { url, totalTests, passedTests, failedTests, results, totalDuration } = summary;
@@ -901,6 +1016,18 @@ function formatMultiPageCrawlMarkdown(result: MultiPageCrawlResult, sessionId: s
  * completely untested while being exercised on every integration run.
  */
 export { server };
+
+/**
+ * Seams for the in-process tests: set the state a browser crawl would
+ * otherwise leave behind, so handlers that read it can be tested without
+ * Chrome. Not part of the server's interface.
+ */
+export const __testing = {
+  setLastAnalysis(analysis: AnalysisResult | null): void {
+    lastAnalysis = analysis;
+  },
+  storeSession,
+};
 
 async function main(): Promise<void> {
   const transport = new StdioServerTransport();
