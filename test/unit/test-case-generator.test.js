@@ -364,6 +364,34 @@ describe("TestCaseGenerator: identifiers", () => {
 
   it("copes with an empty page title", () => {
     const [testCase] = TestCaseGenerator.generate([element()], "");
-    assert.ok(testCase.id.length > 0);
+    assert.equal(testCase.id, "TC_BUTTON_1");
+  });
+
+  it("keeps only [A-Z0-9_] and drops a repeated site name", () => {
+    const [testCase] = TestCaseGenerator.generate(
+      [element(), element(), element()],
+      "BenchmarkShop | BenchmarkShop"
+    ).slice(2);
+    assert.equal(testCase.id, "TC_BENCHMARKSHOP_BUTTON_3");
+  });
+
+  it("strips punctuation and collapses separators", () => {
+    const [testCase] = TestCaseGenerator.generate(
+      [element()],
+      "  Cart — Items (2) | Shop!  "
+    );
+    assert.equal(testCase.id, "TC_CART_ITEMS_2_SHOP_BUTTON_1");
+    assert.match(testCase.id, /^[A-Z0-9_]+$/);
+    assert.doesNotMatch(testCase.id, /__|^_|_$/);
+  });
+});
+
+describe("TestCaseGenerator: forms", () => {
+  it("treats a <form> as a submit action, not a navigation", () => {
+    const [testCase] = TestCaseGenerator.generate(
+      [element({ tag: "form", locator: "#search-form", navigationTarget: "/search" })],
+      "Home"
+    );
+    assert.equal(testCase.actionType, "submit");
   });
 });

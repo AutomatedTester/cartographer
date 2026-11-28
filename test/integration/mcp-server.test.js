@@ -65,7 +65,10 @@ describe("MCP server protocol", () => {
 
     assert.deepEqual(byName.crawl_and_analyze.inputSchema.required, ["url"]);
     assert.ok(byName.run_critical_tests.inputSchema.required.includes("url"));
-    assert.ok(byName.crawl_multi_page.inputSchema.required.includes("startUrl"));
+    // crawl_multi_page takes startUrl or its alias url; the handler requires
+    // one of them, so the schema lists both and requires neither.
+    assert.ok("startUrl" in byName.crawl_multi_page.inputSchema.properties);
+    assert.ok("url" in byName.crawl_multi_page.inputSchema.properties);
   });
 
   it("reports an unknown tool name as a tool error, not a protocol crash", async () => {
@@ -75,16 +78,18 @@ describe("MCP server protocol", () => {
     assert.match(textOf(result), /Unknown tool: no_such_tool/);
   });
 
-  it("rejects a call that omits a required argument", async () => {
-    await assert.rejects(() =>
-      client.callTool({ name: "crawl_and_analyze", arguments: {} })
-    );
+  it("reports a call that omits a required argument as a tool error", async () => {
+    const result = await client.callTool({ name: "crawl_and_analyze", arguments: {} });
+
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /^Invalid arguments: url: /);
   });
 
-  it("rejects an argument of the wrong type", async () => {
-    await assert.rejects(() =>
-      client.callTool({ name: "crawl_and_analyze", arguments: { url: 42 } })
-    );
+  it("reports an argument of the wrong type as a tool error", async () => {
+    const result = await client.callTool({ name: "crawl_and_analyze", arguments: { url: 42 } });
+
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /^Invalid arguments: url: /);
   });
 });
 
@@ -122,12 +127,13 @@ describe("MCP tools that need no browser", () => {
   });
 
   it("get_workflow_by_name requires both sessionId and workflowName", async () => {
-    await assert.rejects(() =>
-      client.callTool({
-        name: "get_workflow_by_name",
-        arguments: { sessionId: "does-not-exist" },
-      })
-    );
+    const result = await client.callTool({
+      name: "get_workflow_by_name",
+      arguments: { sessionId: "does-not-exist" },
+    });
+
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /workflowName/);
   });
 
   it("export_workflow_visualization reports an unknown session rather than throwing", async () => {
@@ -141,18 +147,17 @@ describe("MCP tools that need no browser", () => {
   });
 
   it("export_workflow_visualization rejects a format outside the documented enum", async () => {
-    await assert.rejects(() =>
-      client.callTool({
-        name: "export_workflow_visualization",
-        arguments: { sessionId: "does-not-exist", format: "not-a-format" },
-      })
-    );
+    const result = await client.callTool({
+      name: "export_workflow_visualization",
+      arguments: { sessionId: "does-not-exist", format: "not-a-format" },
+    });
+
+    assert.equal(result.isError, true);
+    assert.match(textOf(result), /format/);
   });
 
   it("stays responsive after a failed call", async () => {
-    await client
-      .callTool({ name: "crawl_and_analyze", arguments: {} })
-      .catch(() => {});
+    await client.callTool({ name: "crawl_and_analyze", arguments: {} });
 
     const { tools } = await client.listTools();
     assert.equal(tools.length, EXPECTED_TOOLS.length);

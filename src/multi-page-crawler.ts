@@ -12,6 +12,77 @@ import {
 import { WebDriver, By, WebElement } from 'selenium-webdriver';
 
 /**
+ * Words that mark a link or button as an action rather than a page to look at.
+ * Exploring a site must not change it: a crawl with credentials must not sign
+ * itself out, and no crawl may delete, buy, unsubscribe or submit anything.
+ *
+ * Matching is case-insensitive and on whole words, after splitting camelCase
+ * and treating any punctuation as a space, so "logout", "/log-out",
+ * "users/sign_out" and "signOut" all match, while "deleted-scenes" does not
+ * match "delete".
+ *
+ * - `always`: never followed as a link, never clicked as a button. Checked
+ *   against a link's URL path and query and against an element's visible text,
+ *   aria-label and id.
+ * - `clickOnly`: never clicked, but a link to such a page is still followed.
+ *   Loading "/checkout" with a GET shows the cart and buys nothing; clicking a
+ *   "Checkout" or "Confirm" button is the step that commits to something.
+ */
+export const CRAWL_DENY_LIST: { readonly always: readonly string[]; readonly clickOnly: readonly string[] } = {
+    always: [
+        'logout', 'log out', 'logoff', 'log off',
+        'signout', 'sign out', 'signoff', 'sign off',
+        'delete', 'remove', 'destroy', 'unsubscribe', 'deactivate',
+        'cancel account', 'close account', 'delete account', 'cancel subscription',
+        'purchase', 'buy now', 'place order', 'pay now', 'submit order', 'complete order',
+    ],
+    clickOnly: [
+        'checkout', 'check out', 'confirm', 'pay', 'buy',
+    ],
+};
+
+/** Lower-case words separated by single spaces, camelCase split apart. */
+function normaliseForDenyList(value: string): string {
+    return value
+        .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+}
+
+/**
+ * The deny-list phrase that rules out following (`follow`) or clicking
+ * (`click`) something described by `descriptions` (URL path, visible text,
+ * aria-label, id), or null when it is safe.
+ */
+export function deniedReason(
+    descriptions: ReadonlyArray<string | undefined | null>,
+    mode: 'follow' | 'click'
+): string | null {
+    const phrases = mode === 'click'
+        ? [...CRAWL_DENY_LIST.always, ...CRAWL_DENY_LIST.clickOnly]
+        : CRAWL_DENY_LIST.always;
+    for (const description of descriptions) {
+        if (!description) continue;
+        const words = ` ${normaliseForDenyList(description)} `;
+        for (const phrase of phrases) {
+            if (words.includes(` ${phrase} `)) return phrase;
+        }
+    }
+    return null;
+}
+
+/** The path and query of a URL, which is what says what loading it does. */
+function pathAndQuery(url: string): string {
+    try {
+        const parsed = new URL(url);
+        return `${parsed.pathname}${parsed.search}`;
+    } catch {
+        return url;
+    }
+}
+
+/**
  * MultiPageCrawler extends SiteCrawler to handle multi-page crawling,
  * state management, and workflow detection.
  */
@@ -125,6 +196,12 @@ export class MultiPageCrawler {
 
             const session = await this.sessionManager.finalize();
             session.metadata.failedPages = this.crawlErrors.length;
+
+            // The credentials were only needed to sign in during the crawl. The
+            // session is returned to MCP clients and kept for later lookups, so
+            // the password must not travel with it.
+            delete session.sessionState.username;
+            delete session.sessionState.password;
             const totalTime = Date.now() - startTime;
 
             // Infer user journeys from heuristic analysis
@@ -180,6 +257,16 @@ export class MultiPageCrawler {
         if (this.sessionManager.isVisited(url)) {
             console.error(`[multi-page-crawler] Already visited ${url}`);
             return null;
+        }
+
+        // Deny-list: never load a URL that acts (log out, delete, buy). The
+        // start URL is exempt: the caller asked for it by name.
+        if (depth > 0) {
+            const reason = deniedReason([pathAndQuery(url)], 'follow');
+            if (reason) {
+                console.error(`[multi-page-crawler] Skipping ${url} (deny-list: "${reason}")`);
+                return null;
+            }
         }
 
         // URL pattern matching
@@ -268,6 +355,10 @@ export class MultiPageCrawler {
 
     private inferFailurePhase(error: unknown): CrawlError['phase'] {
         const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
+        // SiteCrawler's load-failure message, whatever net error it names.
+        if (msg.startsWith('chrome could not load')) {
+            return 'navigate';
+        }
         if (msg.includes('timeout') || msg.includes('script')) {
             return 'analyze';
         }
@@ -376,9 +467,20 @@ export class MultiPageCrawler {
         for (const el of page.highIntentElements) {
             console.error(`[multi-page-crawler]   - ${el.tag} "${el.text}" navigates=${el.navigates} target=${el.navigationTarget}`);
             if (el.navigates && el.navigationTarget) {
-                targets.add(this.resolveUrl(el.navigationTarget, pageUrl));
+                const target = this.resolveUrl(el.navigationTarget, pageUrl);
+                const reason = deniedReason([pathAndQuery(target), el.text, el.ariaLabel, el.id], 'follow');
+                if (reason) {
+                    console.error(`[multi-page-crawler]     Skipping link to ${target} (deny-list: "${reason}")`);
+                    continue;
+                }
+                targets.add(target);
                 console.error(`[multi-page-crawler]     ✅ Added navigation target: ${el.navigationTarget}`);
             } else if (el.navigates && !el.navigationTarget && el.tag === 'button') {
+                const reason = deniedReason([el.text, el.ariaLabel, el.id], 'click');
+                if (reason) {
+                    console.error(`[multi-page-crawler]     Not clicking button "${el.text || el.ariaLabel || el.id}" (deny-list: "${reason}")`);
+                    continue;
+                }
                 // Button marked as navigating but no explicit target - will be handled via allNavigationLinks
                 const btnIdentifier = el.id || el.ariaLabel || el.text || `${el.tag}-${el.classes?.join('-')}`;
                 buttonUrls.push(`__button__:${btnIdentifier}`);
@@ -398,6 +500,11 @@ export class MultiPageCrawler {
                         if (link.startsWith('__button__:')) {
                             buttonUrls.push(link);
                         } else if (!link.startsWith('#')) {
+                            const reason = deniedReason([pathAndQuery(link)], 'follow');
+                            if (reason) {
+                                console.error(`[multi-page-crawler]     Skipping link to ${link} (deny-list: "${reason}")`);
+                                continue;
+                            }
                             targets.add(link);
                         }
                     }
@@ -440,6 +547,11 @@ export class MultiPageCrawler {
         for (const buttonUrl of pendingClicks) {
             try {
                 const buttonId = buttonUrl.replace('__button__:', '');
+                const idReason = deniedReason([buttonId], 'click');
+                if (idReason) {
+                    console.error(`[multi-page-crawler] Not clicking button "${buttonId}" (deny-list: "${idReason}")`);
+                    continue;
+                }
                 console.error(`[multi-page-crawler] Attempting to click button: "${buttonId}"`);
 
                 let clicked = false;
@@ -448,7 +560,7 @@ export class MultiPageCrawler {
                 try {
                     // Strategy 1: By ID
                     const element = await driver.findElement(By.id(buttonId)).catch(() => null) as any;
-                    if (element) {
+                    if (element && !(await this.isDeniedElement(element))) {
                         console.error(`[multi-page-crawler]   Found button by ID: ${buttonId}`);
                         await driver.actions({ async: true }).move({ origin: element }).perform();
                         await element.click();
@@ -462,7 +574,7 @@ export class MultiPageCrawler {
                     try {
                         // Strategy 2: By aria-label
                         const element = await driver.findElement(By.css(`[aria-label="${buttonId}"]`)).catch(() => null) as any;
-                        if (element) {
+                        if (element && !(await this.isDeniedElement(element))) {
                             console.error(`[multi-page-crawler]   Found button by aria-label`);
                             await driver.actions({ async: true }).move({ origin: element }).perform();
                             await element.click();
@@ -479,7 +591,7 @@ export class MultiPageCrawler {
                         const element = await driver.findElement(
                             By.xpath(`//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '${buttonId.toLowerCase()}')] | //*[@role="button"][contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '${buttonId.toLowerCase()}')]`)
                         ).catch(() => null) as any;
-                        if (element) {
+                        if (element && !(await this.isDeniedElement(element))) {
                             console.error(`[multi-page-crawler]   Found button by text`);
                             await driver.actions({ async: true }).move({ origin: element }).perform();
                             await element.click();
@@ -499,16 +611,25 @@ export class MultiPageCrawler {
                         const element = await driver.executeScript<WebElement | null>(`
                             const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
                             const searchTerm = arguments[0];
+                            const denied = arguments[1];
+                            const words = (v) => ' ' + String(v || '')
+                                .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+                                .toLowerCase()
+                                .replace(/[^a-z0-9]+/g, ' ')
+                                .trim() + ' ';
+                            const isDenied = (b) => [b.textContent, b.getAttribute('aria-label'), b.id]
+                                .some((v) => denied.some((p) => words(v).includes(' ' + p + ' ')));
                             const btn = buttons.find(b =>
+                                !isDenied(b) && (
                                 b.textContent?.toLowerCase().includes(searchTerm) ||
                                 b.getAttribute('aria-label')?.toLowerCase().includes(searchTerm) ||
-                                b.id?.toLowerCase().includes(searchTerm)
+                                b.id?.toLowerCase().includes(searchTerm))
                             );
                             if (btn) {
                                 btn.scrollIntoView({ behavior: 'smooth', block: 'center' });
                             }
                             return btn || null;
-                        `, searchTerm);
+                        `, searchTerm, [...CRAWL_DENY_LIST.always, ...CRAWL_DENY_LIST.clickOnly]);
                         if (element) {
                             await driver.actions({ async: true }).click(element as WebElement).perform();
                             clicked = true;
@@ -593,6 +714,33 @@ export class MultiPageCrawler {
         }
 
         return discoveredUrls;
+    }
+
+    /**
+     * Whether a located element turns out to be on the deny-list. The click
+     * strategies match loosely (an id, or text that merely contains the
+     * identifier), so "Account" could land on "Delete account". An element
+     * whose description cannot be read is judged by the identifier, which has
+     * already been checked.
+     */
+    private async isDeniedElement(element: any): Promise<boolean> {
+        const descriptions: string[] = [];
+        try {
+            if (typeof element.getText === 'function') descriptions.push(await element.getText());
+            if (typeof element.getAttribute === 'function') {
+                descriptions.push(await element.getAttribute('aria-label'));
+                descriptions.push(await element.getAttribute('id'));
+                descriptions.push(await element.getAttribute('value'));
+            }
+        } catch {
+            // Unreadable: fall back to the identifier check already made.
+        }
+        const reason = deniedReason(descriptions, 'click');
+        if (reason) {
+            console.error(`[multi-page-crawler]   Not clicking located element (deny-list: "${reason}")`);
+            return true;
+        }
+        return false;
     }
 
     /**

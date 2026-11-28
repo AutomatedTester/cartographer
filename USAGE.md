@@ -1,84 +1,63 @@
 # Usage Guide
 
-Comprehensive guide to installing and using Cartographer, including API reference, examples, and troubleshooting.
+How to set up Cartographer and use each of its seven MCP tools, with example arguments and real output.
 
-## Table of Contents
+Cartographer is an MCP server and nothing else. It speaks MCP over stdio to a client such as Claude Code or Claude Desktop. It has no HTTP API, and it is not a library you import. You use it by asking your MCP client to call its tools, or by calling them from any MCP client.
 
-1. [Installation](#installation)
-2. [Configuration](#configuration)
-3. [API Reference](#api-reference)
-4. [Core Types](#core-types)
-5. [Usage Examples](#usage-examples)
-6. [Output Formats](#output-formats)
-7. [Troubleshooting](#troubleshooting)
-8. [Performance & Optimization](#performance--optimization)
-9. [Integration Examples](#integration-examples)
+Read [Before you crawl](README.md#before-you-crawl) in the README first. Crawls click buttons and `run_critical_tests` submits forms, so use a site you are allowed to test, preferably a test or staging copy.
+
+## Contents
+
+1. [Setup](#setup)
+2. [How the tools fit together](#how-the-tools-fit-together)
+3. [Tool reference](#tool-reference)
+4. [How scoring works](#how-scoring-works)
+5. [Models, downloads and offline use](#models-downloads-and-offline-use)
+6. [Troubleshooting](#troubleshooting)
 
 ---
 
-## Installation
+## Setup
 
-### Prerequisites
-
-- **Node.js** ≥ 18
-- **npm** or **yarn**
-- **Google Chrome** installed (Selenium Manager handles chromedriver)
-
-### npm Install
+You need Node.js 22 or later and Google Chrome.
 
 ```bash
-npm install cartographer-mcp
+git clone https://github.com/AutomatedTester/cartographer.git
+cd cartographer
+npm install
+npm run build:all   # TypeScript build + the in-page analyzer bundle
 ```
 
-### Peer Dependencies
+Both builds are needed. The server injects `build/analyzer.browser.js` into every page it crawls.
 
-The package requires:
+Then register the server with your client.
 
-- `@modelcontextprotocol/sdk` (MCP server framework)
-- `selenium-webdriver` (browser automation)
-- `@huggingface/transformers` (ML model for scoring)
+**Claude Code**
 
-These are automatically installed via npm.
+```bash
+claude mcp add cartographer -- node /absolute/path/to/cartographer/build/index.js
+```
 
-### Running as MCP Server
+**Claude Desktop** (`claude_desktop_config.json`, then restart the app)
 
-To use as a Model Context Protocol server (e.g., with Claude Desktop):
+```json
+{
+  "mcpServers": {
+    "cartographer": {
+      "command": "node",
+      "args": ["/absolute/path/to/cartographer/build/index.js"]
+    }
+  }
+}
+```
 
-1. **Build the project:**
+If Claude Desktop can't find `node`, use the full path that `which node` prints.
 
-   ```bash
-   npm run build
-   ```
+The client starts and stops the server. If you run `npm start` yourself, it prints `Cartographer MCP server running on stdio` and then waits silently for a client. That is expected. Stop it with Ctrl+C.
 
-2. **Configure your MCP client** (e.g., `claude_desktop_config.json`):
+### Environment variables
 
-   ```json
-   {
-     "mcpServers": {
-       "cartographer": {
-         "command": "node",
-         "args": ["/absolute/path/to/project/build/index.js"]
-       }
-     }
-   }
-   ```
-
-3. **Restart your MCP client** to load the server.
-
-The server will expose three MCP tools over stdio:
-
-- `crawl_and_analyze`
-- `get_element_locator`
-- `run_critical_tests`
-- `audit_aria`
-
----
-
-## Configuration
-
-### Environment Variables
-
-Optional configuration via environment variables:
+All are optional. Set them in your client's `env` block, or on the command line for `npm start`.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
@@ -88,318 +67,220 @@ Optional configuration via environment variables:
 | `CARTOGRAPHER_LOCATOR_MIN_SIMILARITY` | model default | Minimum similarity for a meaning-only locator match |
 | `HF_TOKEN` | unset | Hugging Face token for a private `CARTOGRAPHER_LOCATOR_MODEL` |
 
-Chrome is found by Selenium Manager, and the analyzer picks its ML device (WebNN, WebGPU or WASM) itself. Timeouts are per-call options on `crawl_multi_page`, not environment variables.
+Older `WEBMCP_*` names are still read when the `CARTOGRAPHER_*` one is unset. Timeouts are per-call options on `crawl_multi_page`, not environment variables.
 
-**Example:**
+With Claude Code, for example:
 
 ```bash
-CARTOGRAPHER_HEADED=1 npm start
+claude mcp add cartographer -e CARTOGRAPHER_HEADED=1 -- node /absolute/path/to/cartographer/build/index.js
 ```
-
-### MCP Server Configuration
-
-The server reads from stdin and writes to stdout. No configuration files needed—it works out of the box once registered with your MCP client.
 
 ---
 
-## API Reference
+## How the tools fit together
 
-### Tool 1: `crawl_and_analyze`
+| Tool | Opens Chrome? | Depends on |
+|---|---|---|
+| `crawl_and_analyze` | Yes, one page | Nothing |
+| `get_element_locator` | No | The most recent `crawl_and_analyze` |
+| `run_critical_tests` | Yes, one page | Nothing. It crawls the page itself |
+| `audit_aria` | Yes, one page | Nothing |
+| `crawl_multi_page` | Yes, many pages | Nothing |
+| `get_workflow_by_name` | No | A `sessionId` from `crawl_multi_page` |
+| `export_workflow_visualization` | No | A `sessionId` from `crawl_multi_page` |
 
-Crawls a website, analyzes its DOM, and generates prioritized test cases with semantic tools.
+Rules that apply to every tool:
 
-#### Input Schema
+- **Markdown by default.** Tools that can return JSON do so only when you pass `"format": "json"`.
+- **Errors are results.** A failure comes back as a tool result with `isError: true` and a one-line message.
+- **URLs without a scheme get `https://`.** `example.com` becomes `https://example.com`. Write `http://` yourself for http-only sites.
+- **State lives in memory.** The last `crawl_and_analyze` result and `crawl_multi_page` sessions (kept for one hour) are lost when the server restarts.
 
-```typescript
-interface CrawlAndAnalyzeInput {
-  url: string;                    // URL to crawl (required)
-  format?: 'json' | 'markdown' | 'markdown-summary';  // Output format (default: 'markdown')
-  ariaAudit?: boolean;            // Also return the audit_aria advisory (default: false)
-}
-```
-
-#### Output Schema (JSON)
-
-```typescript
-interface CrawlAndAnalyzeOutput {
-  testCases: TestCase[];         // Array of generated test cases
-  semanticTools: SemanticTool[]  // Array of auto-generated tools
-  metadata: {
-    url: string;
-    crawledAt: string;           // ISO timestamp
-    totalElements: number;
-    analyzedElements: number;
-    highIntentElements: number;  // score >= 50
-  }
-}
-```
-
-#### Examples
-
-**Basic crawl (JSON output):**
-
-```bash
-curl -X POST http://localhost:3000/tools/crawl_and_analyze \
-  -H "Content-Type: application/json" \
-  -d '{
-    "url": "https://example.com",
-    "format": "json"
-  }'
-```
-
-**Response:**
-
-```json
-{
-  "testCases": [
-    {
-      "id": "test-1",
-      "element": "Sign In button",
-      "selector": "button[data-testid='sign-in']",
-      "action": "click",
-      "priority": "critical",
-      "score": 87,
-      "preconditions": [
-        "User is on the login page"
-      ],
-      "steps": [
-        "Click the Sign In button"
-      ],
-      "expectedResults": [
-        "User should be authenticated",
-        "Dashboard should load"
-      ],
-      "tags": ["action:click", "element:button", "destructive:false"]
-    }
-  ],
-  "semanticTools": [
-    {
-      "name": "signIn",
-      "description": "Sign In button",
-      "inputSchema": {
-        "type": "object",
-        "properties": {}
-      }
-    }
-  ],
-  "metadata": {
-    "url": "https://example.com",
-    "crawledAt": "2026-02-28T10:30:00Z",
-    "totalElements": 234,
-    "analyzedElements": 54,
-    "highIntentElements": 12
-  }
-}
-```
-
-**Markdown report:**
-
-```json
-{
-  "url": "https://example.com",
-  "format": "markdown"
-}
-```
-
-Returns a formatted Markdown document with test cases in table format, tool definitions, and analysis summary.
-
-**Summary format:**
-
-```json
-{
-  "url": "https://example.com",
-  "format": "markdown-summary"
-}
-```
-
-Returns a concise Markdown overview with test counts by priority and key metrics.
+A typical conversation: crawl a page, ask for a few locators, then run the critical tests.
 
 ---
 
-### Tool 2: `get_element_locator`
+## Tool reference
 
-Returns the most stable CSS or XPath locator for an element described in natural language.
+The examples below were crawled from BenchmarkShop, the fixture site in `benchmark/app` (start it with `npm run benchmark:install` once, then `npm --prefix benchmark/app start`). Output is abridged.
 
-#### Input Schema
+### crawl_and_analyze
 
-```typescript
-interface GetElementLocatorInput {
-  description: string;    // Natural language description of element (required)
-  // Uses data from most recent crawl_and_analyze call
-}
+Loads one page in headless Chrome, scores its interactive elements, and writes a test case for each.
+
+| Argument | Required | Default | Notes |
+|---|---|---|---|
+| `url` | Yes | | |
+| `format` | No | `markdown` | `markdown`, `markdown-summary` or `json` |
+| `ariaAudit` | No | `false` | Also run the [`audit_aria`](#audit_aria) advisory on the same page |
+
+```json
+{ "url": "http://localhost:3000/" }
 ```
+
+Output (`markdown`, abridged):
+
+```markdown
+# Test Analysis Report: BenchmarkShop
+
+**URL:** http://localhost:3000/
+
+## Executive Summary
+
+- **Total Elements Analyzed:** 35
+- **Auto-Generated Test Cases:** 35
+- **Average Intent Score:** 68/100
+- **Analysis Device:** none (heuristic scoring — ML unavailable)
+- **LLM Tokens Used:** 0 (no cloud LLM calls — all analysis runs locally)
+
+## Generated Test Cases
+
+**CRITICAL:** 28 | **HIGH:** 4 | **MEDIUM:** 1 | **LOW:** 2
+
+#### 2. Verify form submission via "Search" button
+
+**ID:** `TC_BENCHMARKSHOP_BUTTON_2`
+**Type:** submit
+**Intent Score:** 100/100
+**Locator:** `#search-btn`
+
+**Test Steps:**
+1. Verify all required form fields are present
+2. Fill required form fields with valid test data
+3. Locate the "Search" button using locator: #search-btn
+4. Click the "Search" button to submit the form
+...
+```
+
+`markdown-summary` gives just the list:
+
+```markdown
+# Test Cases Summary
+
+## CRITICAL Priority (28)
+
+- **Verify search input field "Search products…" accepts user input**
+  - Locator: `#search-input`
+  - Type: input
+  - Score: 100
+```
+
+`json` returns the full `AnalysisResult` from [`src/types.ts`](src/types.ts): `url`, `title`, `highIntentElements`, `generatedTestCases` (each with `id`, `name`, `priority`, `actionType`, `locator`, `steps`, `expectedResults`, `intentScore`, `tags`, and `semanticTool` for critical tests), `allNavigationLinks`, `metrics`, and `ariaAudit` when requested.
+
+### get_element_locator
+
+Finds the element that best matches a plain-English description and returns its locator. It does not open Chrome.
+
+It searches the page from the most recent `crawl_and_analyze` call, and only that page. Pages crawled by `crawl_multi_page` or `run_critical_tests` are not used.
+
+| Argument | Required | Notes |
+|---|---|---|
+| `description` | Yes | For example `"the search button"` |
+
+```json
+{ "description": "search button" }
+```
+
+Output:
+
+```text
+Locator: #search-btn
+Type: css
+Confidence: 99%
+Reason: Found by ID: "search-btn"
+Matched by: keyword (keyword only)
+```
+
+`Matched by` says how the element was found: `semantic`, `keyword+semantic` or `keyword`. The part in brackets says whether the embedding model was used (`semantic + keyword`) or not (`keyword only`).
+
+Errors:
+
+- No `crawl_and_analyze` yet: `No crawl data available. Run crawl_and_analyze first.`
+- Nothing on the page matches the description: an error result saying so. Try other words, or crawl the page the element is on.
 
 #### How matching works
 
 Each element from the last crawl is scored two ways:
 
-- **Meaning**: the description and a short phrase for each element (for example `button, text: Proceed to payment`) are embedded with a local sentence model, `Xenova/all-MiniLM-L6-v2` (about 23 MB quantised). The model downloads from Hugging Face on first use and is cached; the server starts loading it after each crawl so the first lookup doesn't wait.
-- **Shared words**: keywords from the description matched against the element's text, label, id, classes and placeholder. Generic words such as "button" or "link" don't count here, because they match ids and classes all over a page.
+- **Meaning.** The description and a short phrase for each element (for example `button, text: Proceed to payment`) are embedded with a local sentence model, `Xenova/all-MiniLM-L6-v2` (about 23 MB quantised). The server starts loading it after each crawl so the first lookup doesn't wait.
+- **Shared words.** Keywords from the description are matched against the element's text, label, id, classes and placeholder. Generic words such as "button" or "link" don't count here, because they match ids and classes all over a page.
 
-Elements are ranked by meaning, with shared words as a bounded tie-breaker. An element with no word in common counts as a match only if its similarity is at least 0.2. Unrelated descriptions measured below 0.1 against a real page, and true paraphrases from 0.26 up.
+Elements are ranked by meaning, with shared words as a bounded tie-breaker. An element with no word in common counts as a match only if its similarity is at least 0.2.
 
-The result says which method found the element (`Matched by: semantic`, `keyword+semantic` or `keyword`). If the model can't be loaded (offline, say) or isn't ready within 15 seconds, the lookup uses keyword matching alone and says so (`keyword only`).
-
-Set `CARTOGRAPHER_SEMANTIC_LOCATOR=off` in the server's environment to always use keyword matching alone.
+If the model can't be loaded, or isn't ready within 15 seconds, the lookup uses keyword matching alone and says `keyword only`. Set `CARTOGRAPHER_SEMANTIC_LOCATOR=off` to always use keyword matching.
 
 To use a fine-tuned model, set `CARTOGRAPHER_LOCATOR_MODEL` to its folder or Hugging Face id, and `CARTOGRAPHER_LOCATOR_MIN_SIMILARITY` to the threshold its evaluation recommends. [training/README.md](training/README.md) covers training, evaluating and storing one.
 
-#### Output Schema
+### run_critical_tests
 
-```typescript
-interface GetElementLocatorOutput {
-  locator: string;        // CSS selector or XPath
-  locatorType: 'css' | 'xpath';
-  confidence: number;     // 0-100, higher is more reliable
-  element: {
-    text?: string;
-    selector?: string;
-    ariaLabel?: string;
-  }
-}
+Crawls the page once, then runs its critical test cases (intent score 50 or more) in that same browser. You don't need to call `crawl_and_analyze` first, and the browser is closed when it finishes.
+
+Each test calls an auto-generated semantic tool in the page, which clicks, types or submits on the live page. Tests tagged `destructive` (delete actions) are skipped. Run it against a test or staging site.
+
+| Argument | Required | Default | Notes |
+|---|---|---|---|
+| `url` | Yes | | |
+| `testIds` | No | all critical tests | IDs from `crawl_and_analyze`, such as `TC_BENCHMARKSHOP_BUTTON_3` |
+| `retryCount` | No | `0` | Extra attempts for a failing test |
+| `format` | No | `markdown` | `markdown` or `json` |
+
+```json
+{ "url": "http://localhost:3000/", "testIds": ["TC_BENCHMARKSHOP_INPUT_1"] }
 ```
 
-#### Examples
+Output (`markdown`, abridged):
 
-```bash
-# After running crawl_and_analyze
-curl -X POST http://localhost:3000/tools/get_element_locator \
-  -H "Content-Type: application/json" \
-  -d '{
-    "description": "the submit button in the login form"
-  }'
+```markdown
+# Test Execution Results
+
+**URL:** http://localhost:3000/
+**Total Duration:** 106ms
+
+## Summary
+
+| Metric | Count |
+|--------|-------|
+| Total Tests | 1 |
+| Passed | 1 |
+| Failed | 0 |
+| Pass Rate | 100.0% |
+
+## Test Results
+
+### ✅ PASS - TC_BENCHMARKSHOP_INPUT_1
+
+- **Tool:** searchProducts
+- **Message:** Tool executed successfully
+- **Duration:** 105ms
 ```
 
-**Response:**
+`json` returns a `TestExecutionSummary`:
 
 ```json
 {
-  "locator": "button[data-testid='submit']",
-  "locatorType": "css",
-  "confidence": 95,
-  "element": {
-    "text": "Submit",
-    "selector": "button[data-testid='submit']",
-    "ariaLabel": "Submit form"
-  }
-}
-```
-
-**More examples:**
-
-```json
-// Find search input
-{
-  "description": "search box in the header"
-}
-
-// Find modal button
-{
-  "description": "close button in modal dialog"
-}
-
-// Find link by partial text
-{
-  "description": "terms of service link in footer"
-}
-```
-
----
-
-### Tool 3: `run_critical_tests`
-
-Executes high-priority test cases (score ≥ 50) using auto-generated semantic tools in the browser context.
-
-#### Input Schema
-
-```typescript
-interface RunCriticalTestsInput {
-  url: string;                   // URL to crawl and test (required)
-  testIds?: string[];            // Specific test IDs to run; if omitted, runs all critical tests
-  retryCount?: number;           // Re-run a failing test up to this many more times (default: 0)
-  format?: 'json' | 'markdown';  // default: 'json'
-}
-```
-
-#### Output Schema
-
-```typescript
-interface RunCriticalTestsOutput {
-  results: TestResult[];
-  summary: {
-    totalTests: number;
-    passed: number;
-    failed: number;
-    skipped: number;
-  }
-}
-
-interface TestResult {
-  testId: string;
-  passed: boolean;
-  duration: number;        // milliseconds
-  error?: string;
-  assertions?: {
-    actual: any;
-    expected: any;
-  }[]
-}
-```
-
-#### Examples
-
-```bash
-# Run all critical tests from last crawl
-curl -X POST http://localhost:3000/tools/run_critical_tests \
-  -H "Content-Type: application/json" \
-  -d '{}'
-```
-
-**Response:**
-
-```json
-{
+  "url": "http://localhost:3000/",
+  "totalTests": 1,
+  "passedTests": 1,
+  "failedTests": 0,
   "results": [
     {
-      "testId": "test-1",
-      "passed": true,
-      "duration": 234
-    },
-    {
-      "testId": "test-2",
-      "passed": false,
-      "duration": 156,
-      "error": "Element not found",
-      "assertions": [
-        {
-          "actual": null,
-          "expected": "HTMLButtonElement"
-        }
-      ]
+      "testId": "TC_BENCHMARKSHOP_INPUT_1",
+      "toolName": "searchProducts",
+      "success": true,
+      "message": "Tool executed successfully",
+      "duration": 105
     }
   ],
-  "summary": {
-    "totalTests": 2,
-    "passed": 1,
-    "failed": 1,
-    "skipped": 0
-  }
+  "totalDuration": 106,
+  "semanticTools": ["…"]
 }
 ```
 
-**Run specific tests:**
+A failed result also has an `error` field.
 
-```bash
-curl -X POST http://localhost:3000/tools/run_critical_tests \
-  -H "Content-Type: application/json" \
-  -d '{
-    "testIds": ["test-1", "test-3"]
-  }'
-```
+If `testIds` are given and none of them match, the result is an error that lists the valid IDs. Test IDs are built from the page title and the element, so they change if the page title changes.
 
----
-
-### Tool 4: `audit_aria`
+### audit_aria
 
 An advisory review of the ARIA on a page. It is built on the first rule of ARIA, that no ARIA is better than bad ARIA, and looks for ARIA that makes the page harder to use than plain HTML would be.
 
@@ -410,16 +291,40 @@ It runs only when requested:
 
 Findings are advice. They never turn a tool call into an error. `isError` is only set if the page could not be loaded at all.
 
-#### Input Schema
+| Argument | Required | Default |
+|---|---|---|
+| `url` | Yes | |
+| `format` | No | `markdown` (or `json`) |
 
-```typescript
-interface AuditAriaInput {
-  url: string;                      // URL to review (required)
-  format?: 'json' | 'markdown';     // default: 'markdown'
-}
+```json
+{ "url": "http://localhost:3000/aria-lab" }
 ```
 
-#### What every advisory contains
+Output (abridged):
+
+```markdown
+# ARIA Advisory: ARIA Lab | BenchmarkShop
+
+Scanned 65 elements, 40 of which carry ARIA.
+
+| Severity | Advisories |
+|----------|-----------|
+| High | 3 |
+| Medium | 8 |
+| Low | 1 |
+
+**7 of 12** can be fixed by deleting ARIA, and users lose nothing they get from it today.
+
+### Announced as a control but cannot be reached from the keyboard
+
+- **Element:** `#bad-div-button`: `<div id="bad-div-button" role="button" class="btn btn-primary">`
+- **What's wrong:** role="button" is on a <div> that is not focusable (no tabindex, not a native control).
+- **What a user experiences:** A screen reader announces "button", which promises a control. But Tab never reaches it...
+- **Advice:** Use the native element (<button>, <a href>, <input type="checkbox">…)...
+- **If you remove this ARIA:** The "button" announcement...
+```
+
+In JSON, every advisory has these fields:
 
 | Field | Meaning |
 |---|---|
@@ -431,9 +336,7 @@ interface AuditAriaInput {
 | `severity` | `high` (blocks or misleads), `medium` (degrades), `low` (noise) |
 | `fix` | `remove-aria`, `change-aria`, `add-aria` or `use-native-html` |
 
-The summary counts `safeToRemove` advisories separately. They are bad ARIA that can simply be deleted.
-
-#### What it checks
+What it checks:
 
 | Rule | Example |
 |---|---|
@@ -454,754 +357,198 @@ The summary counts `safeToRemove` advisories separately. They are bad ARIA that 
 
 The rules are heuristics over the DOM, not a full accessibility tree. They are tuned to stay quiet when unsure. An empty report means none of these patterns were found, not that the page is accessible.
 
-#### Example (Markdown, abridged)
-
-```markdown
-### Announced as a control but cannot be reached from the keyboard
-
-- **Element:** `#add`: `<div id="add" role="button">`
-- **What a user experiences:** A screen reader announces "button", which promises a control. But Tab never reaches it...
-- **Advice:** Use the native element (<button>, <a href>, ...)...
-- **If you remove this ARIA:** The "button" announcement. That announcement is currently a promise the element can't keep...
-```
-
----
-
-## Core Types
-
-These TypeScript interfaces define the data structures returned by the tools. Reference them when parsing responses.
-
-### TestCase
-
-```typescript
-interface TestCase {
-  id: string;                       // Unique test ID (e.g., "test-1")
-  element: string;                  // Human-readable element identifier
-  selector: string;                 // CSS selector or XPath for element
-  action: ActionType;               // What action to perform
-  priority: 'critical' | 'high' | 'medium' | 'low';
-  score: number;                    // Intent score (0-100)
-  preconditions: string[];          // What must be true before test
-  steps: string[];                  // Test execution steps
-  expectedResults: string[];        // What should happen after
-  tags: string[];                   // Filter tags (action type, element type, etc.)
-  semanticToolRef?: {               // Reference to auto-generated tool
-    name: string;                   // Tool name (camelCase)
-    description: string;
-  }
-}
-
-type ActionType =
-  | 'click'                         // Click button, link
-  | 'input'                         // Type into input field
-  | 'submit'                        // Submit form
-  | 'navigate'                      // Follow nav link
-  | 'select'                        // Choose dropdown option
-  | 'hover'                         // Hover over element
-  | 'delete';                       // Delete/remove operation
-```
-
-### SemanticTool
-
-```typescript
-interface SemanticTool {
-  name: string;                     // camelCase name (e.g., "searchButton")
-  description: string;              // Human-readable description
-  targetSelector: string;           // CSS selector to invoke tool on
-  inputSchema: {                    // JSON Schema for tool inputs
-    type: 'object';
-    properties: Record<string, {
-      type: string;                 // "string", "number", "boolean", etc.
-      description: string;
-    }>;
-    required?: string[];
-  };
-  outputSchema?: {                  // Expected tool output structure
-    type: string;
-    properties?: Record<string, any>;
-  };
-}
-```
-
-### AnalysisResult
-
-```typescript
-interface AnalysisResult {
-  selector: string;                 // CSS selector
-  element: HTMLElement;             // Reference to DOM element
-  score: number;                    // Intent score (0-100)
-  intents: string[];                // Tags (e.g., ["action", "click"])
-  reasoning: string;                // Why this element was scored
-}
-```
-
-### Scoring Logic
-
-**Intent scores** (0-100) are calculated via:
-
-1. **Heuristic Base Score** (0-50 points):
-   - Buttons, links: +40 points
-   - Form inputs: +35 points
-   - Interactive elements: +25 points
-   - Visible + enabled: +10 points
-   - Hidden/disabled: -20 points
-
-2. **ML Semantic Score** (0-50 points):
-   - Uses Transformers.js to extract text embeddings
-   - Compares against test-related keywords ("button", "login", "submit", etc.)
-   - Cosine similarity 0-1 scaled to 0-50
-
-3. **Deduplication**:
-   - Elements with ≥0.92 semantic similarity to existing elements are merged
-   - Prevents duplicate test cases for very similar elements
-
-**Example:** A button labeled "Sign In" with `aria-label="Sign In"`:
-
-- Heuristic: 50 (button + visible + labeled)
-- ML semantic: 45 (high similarity to "authentication")
-- **Total: 95 (critical priority)**
-
----
-
-## Usage Examples
-
-### Example 1: Basic Website Test Case Generation
-
-Crawl a website and generate test cases.
-
-```bash
-curl -X POST http://localhost:3000/tools/crawl_and_analyze \
-  -H "Content-Type: application/json" \
-  -d '{
-    "url": "https://github.com",
-    "format": "json"
-  }' > github-tests.json
-
-cat github-tests.json
-```
-
-**Output:** JSON file with ~30-50 test cases for GitHub homepage.
-
-### Example 2: Form Testing
-
-Generate tests for login form and extract input locators.
-
-```bash
-# Step 1: Crawl login page
-curl -X POST http://localhost:3000/tools/crawl_and_analyze \
-  -H "Content-Type: application/json" \
-  -d '{
-    "url": "https://example.com/login",
-    "format": "json"
-  }' > login-tests.json
-
-# Step 2: Get locator for email input
-curl -X POST http://localhost:3000/tools/get_element_locator \
-  -H "Content-Type: application/json" \
-  -d '{
-    "description": "email input field"
-  }'
-
-# Step 3: Get locator for password input
-curl -X POST http://localhost:3000/tools/get_element_locator \
-  -H "Content-Type: application/json" \
-  -d '{
-    "description": "password input field"
-  }'
-
-# Step 4: Run critical tests
-curl -X POST http://localhost:3000/tools/run_critical_tests \
-  -H "Content-Type: application/json" \
-  -d '{}'
-```
-
-### Example 3: E-commerce Checkout Flow
-
-Test an e-commerce site's critical elements.
-
-```javascript
-// Node.js example using fetch
-
-async function testCheckout() {
-  const baseURL = 'http://localhost:3000/tools';
-
-  // 1. Crawl checkout page
-  const crawlRes = await fetch(`${baseURL}/crawl_and_analyze`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      url: 'https://myshop.com/checkout',
-      format: 'json'
-    })
-  });
-
-  const {testCases, semanticTools} = await crawlRes.json();
-
-  // 2. Log critical tests
-  const criticalTests = testCases.filter(t => t.priority === 'critical');
-  console.log(`Found ${criticalTests.length} critical tests`);
-
-  // 3. Find "Place Order" button locator
-  const locatorRes = await fetch(`${baseURL}/get_element_locator`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({
-      description: 'place order button'
-    })
-  });
-
-  const {locator} = await locatorRes.json();
-  console.log(`Place Order button: ${locator}`);
-
-  // 4. Run critical tests
-  const testRes = await fetch(`${baseURL}/run_critical_tests`, {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({})
-  });
-
-  const {summary} = await testRes.json();
-  console.log(`Tests: ${summary.passed}/${summary.totalTests} passed`);
-}
-
-testCheckout();
-```
-
-### Example 4: Markdown Report for Stakeholders
-
-Generate human-readable test report.
-
-```bash
-curl -X POST http://localhost:3000/tools/crawl_and_analyze \
-  -H "Content-Type: application/json" \
-  -d '{
-    "url": "https://example.com",
-    "format": "markdown"
-  }' > test-report.md
-
-# Open in markdown viewer or convert to PDF
-pandoc test-report.md -o test-report.pdf
-```
-
-### Example 5: Multi-Page Crawling with Login Automation
-
-Crawl multiple pages including those behind a login form.
-
-#### Setup: Store Credentials in Session
-
-```javascript
-import { MultiPageCrawler } from 'cartographer-mcp';
-
-// Create crawler configuration
-const config = {
-  startUrl: 'https://protected-site.com',
-  maxPages: 20,           // Crawl up to 20 pages
-  maxDepth: 3,            // Max 3 levels deep
-  enableAutoLogin: true,  // Enable automatic login detection (default: true)
-};
-
-// Create crawler instance
-const crawler = new MultiPageCrawler(config);
-
-// Access internal session manager and store credentials
-// (These will be used when a login form is detected)
-const session = crawler['sessionManager'];
-session.updateState('username', process.env.LOGIN_USER || 'testuser@example.com');
-session.updateState('password', process.env.LOGIN_PASS || 'testpassword123');
-
-// Start crawling - LoginHandler will automatically:
-// 1. Detect login forms
-// 2. Fill username/password fields from session state
-// 3. Click submit button
-// 4. Validate login success (URL change + HTML indicators)
-// 5. Continue crawling pages behind the login
-const result = await crawler.crawl();
-
-console.log('Crawl Results:');
-console.log(`- Total pages crawled: ${result.summary.pagesVisited}`);
-console.log(`- High-intent elements: ${result.summary.highIntentElements}`);
-console.log(`- Workflows detected: ${result.summary.workflowsDetected}`);
-
-// Check login success in session state
-const finalState = result.session.sessionState;
-if (finalState.lastLoginSuccess) {
-  console.log(`✓ Login successful at ${new Date(finalState.lastLoginSuccess)}`);
-} else if (finalState.lastLoginFailure) {
-  console.log(`✗ Login failed: ${finalState.lastLoginFailure.reason}`);
-}
-```
-
-#### How Login Automation Works
-
-1. **Detection**: When the crawler encounters a page with:
-   - URL patterns like `/login`, `/signin`, `/auth`
-   - Both username/email and password input fields
-   - A submit button
-
-   The `WorkflowDetector.isLoginFormPage()` method identifies it as a login form.
-
-2. **Form Filling**: The `LoginHandler` fills the form with credentials from session state:
-   - Finds username/email input field
-   - Finds password input field
-   - Enters credentials
-
-3. **Submission**: Clicks the submit button and waits for page load:
-   - Handles form submit via click or JavaScript
-   - Waits for page to load and stabilize (up to `pageLoadTimeout`)
-
-4. **Validation**: Confirms login success using multiple indicators:
-   - **URL change**: Page redirected away from login URL
-   - **Logout button**: Presence of logout/sign-out link/button
-   - **User profile**: Presence of user menu or profile element
-   - **Login form gone**: Login form no longer visible on page
-
-   If any of these indicators are positive, login is considered successful.
-
-5. **Continuation**: After successful login, the crawler continues with the next pages:
-   - Crawler now has an authenticated session
-   - Can access pages normally behind login (dashboard, profile, etc.)
-   - Detected workflows include authentication flows
-
-#### Configuration Options
-
-```typescript
-interface MultiPageCrawlConfig {
-  // ... existing options ...
-
-  /** Enable automatic login form detection and filling (default: true) */
-  enableAutoLogin?: boolean;
-
-  /** Login credentials (optional - credentials can be set via session state) */
-  credentials?: {
-    username: string;
-    password: string;
-  };
-}
-```
-
-#### Session State Keys
-
-When login detection and filling occurs, the following keys are updated in session state:
-
-| Key | Value | Purpose |
-|-----|-------|---------|
-| `username` | string | Username/email for login (set by application) |
-| `password` | string | Password for login (set by application) |
-| `lastLoginSuccess` | timestamp | When login was successful (set by LoginHandler) |
-| `lastLoginFailure` | object | Details of failed login attempt |
-| `lastLoginError` | object | Error details if login threw exception |
-
-#### Environment Variables for Credentials
-
-For security, pass credentials via environment variables:
-
-```bash
-export LOGIN_USER=testuser@example.com
-export LOGIN_PASS=securepassword123
-node your-script.js
-```
-
-Then in code:
-
-```javascript
-session.updateState('username', process.env.LOGIN_USER);
-session.updateState('password', process.env.LOGIN_PASS);
-```
-
-#### Real-World Example: Testing Protected API Dashboard
-
-```javascript
-import { MultiPageCrawler } from 'cartographer-mcp';
-import fs from 'fs';
-
-async function auditProtectedDashboard() {
-  console.log('Starting audit of protected dashboard...');
-
-  const config = {
-    startUrl: 'https://api.example.com',  // Redirects to login
-    maxPages: 50,
-    maxDepth: 4,
-    enableAutoLogin: true,
-    intentThreshold: 25,
-    detectWorkflows: true,
-  };
-
-  const crawler = new MultiPageCrawler(config);
-
-  // Set credentials from environment
-  const session = crawler['sessionManager'];
-  session.updateState('username', process.env.DASHBOARD_USER);
-  session.updateState('password', process.env.DASHBOARD_PASS);
-
-  // Run crawl
-  const result = await crawler.crawl();
-
-  // Analyze results
-  const authWorkflows = result.session.workflows.filter(w =>
-    w.tags.includes('authentication')
-  );
-
-  const pagesAfterLogin = result.session.pages.filter(p =>
-    p.url.includes('/dashboard') || p.url.includes('/profile')
-  );
-
-  console.log(`\nAudit Summary:`);
-  console.log(`- Pages crawled: ${result.summary.pagesVisited}`);
-  console.log(`- Pages after login: ${pagesAfterLogin.length}`);
-  console.log(`- Auth workflows detected: ${authWorkflows.length}`);
-  console.log(`- Total high-intent elements: ${result.summary.highIntentElements}`);
-
-  // Save full report
-  fs.writeFileSync(
-    'dashboard-audit-report.json',
-    JSON.stringify(result, null, 2)
-  );
-
-  console.log('✓ Full report saved to dashboard-audit-report.json');
-}
-
-auditProtectedDashboard().catch(console.error);
-```
-
-#### Disabling Auto-Login
-
-If you want to crawl only the login page without auto-login:
-
-```javascript
-const config = {
-  startUrl: 'https://protected-site.com/login',
-  enableAutoLogin: false,  // Disable automatic login
-};
-
-const crawler = new MultiPageCrawler(config);
-const result = await crawler.crawl();
-```
-
----
-
-## Output Formats
-
-### JSON Format
-
-Fully structured data suitable for programmatic processing.
+### crawl_multi_page
+
+Crawls a site breadth-first from a start URL, staying on the same site. It analyses each page, clicks buttons that look like navigation to find where they lead, and detects workflows that span pages. With `credentials` it finds the login form and signs in first.
+
+| Argument | Default | Notes |
+|---|---|---|
+| `startUrl` (or `url`) | required | |
+| `maxPages` | 10 | 2–50 |
+| `maxDepth` | 3 | 1–5 |
+| `excludeUrlPatterns` | none | Regular expressions. A URL matching any of them is never visited |
+| `pageLoadTimeout` | 30000 | ms |
+| `scriptTimeoutMs` | 120000 | ms, Selenium async-script timeout |
+| `analysisTimeoutMs` | 90000 | ms, in-page analyzer watchdog |
+| `modelLoadTimeoutMs` | 5000 | ms per backend before falling back to heuristic scoring |
+| `detectWorkflows` | `true` | |
+| `workflowStrategy` | `both` | `heuristic`, `ml-based` or `both` |
+| `enableAutoLogin` | `true` | Only acts when `credentials` are given |
+| `credentials` | none | `{ "username": "…", "password": "…" }` |
+| `format` | `markdown` | or `json`. JSON includes every page's elements and test cases, so it is very large |
 
 ```json
 {
-  "testCases": [...],
-  "semanticTools": [...],
-  "metadata": {...}
+  "startUrl": "http://localhost:3000/",
+  "maxPages": 4,
+  "maxDepth": 2,
+  "excludeUrlPatterns": ["/admin", "/account/delete"]
 }
 ```
 
-**Use when:**
+Output (abridged):
 
-- Integrating with test frameworks (Jest, Playwright, etc.)
-- Parsing and filtering results programmatically
-- Storing results in databases
+```markdown
+# Multi-Page Crawl Results
 
-### Markdown Format
+**Session ID:** `session_1795871943763_2hl15gbm6`
+**Start URL:** http://localhost:3000/
 
-Complete human-readable report with tables, descriptions, and examples.
+## Summary
 
-**Includes:**
+| Metric | Count |
+|--------|-------|
+| Pages Visited | 4 |
+| Failed Pages | 0 |
+| Total Elements | 142 |
+| High-Intent Elements | 142 |
+| Workflows Detected | 1 |
+| Estimated User Journeys | 3 |
 
-- Crawl metadata (URL, timestamp, element count)
-- Test case table with action, priority, preconditions
-- Semantic tools table with names and descriptions
-- Preconditions and expected results for each test
-- Code examples for execution
+## Detected Workflows
 
-**Use when:**
+### navigation_menu_exploration
+- **ID:** `wf_navmenu_687c7492-916c-4a19-9bc8-87210c328fcb`
+- **Confidence:** 70%
+- **Pages:** 3
+- **Tags:** navigation, menu-driven, user-exploration, search
 
-- Creating documentation for stakeholders
-- Sharing results with humans
-- Including in pull requests or issue comments
-- Converting to PDF for reports
+## Inferred User Journeys
 
-### Summary Format
+### Product Discovery & Browse
+- **Description:** Users visit the homepage, use search functionality, filter/navigate products, and view product details
+- **Confidence:** 85%
+...
+```
 
-Concise Markdown overview focused on metrics.
+Keep the `sessionId`: the next two tools need it.
 
-**Includes:**
+**What it won't touch.** Even without `excludeUrlPatterns`, the crawler never follows or clicks links and buttons that look like log out or sign out, delete or remove, unsubscribe, or place order, buy now or pay. Add your own patterns for anything else that must not be visited, such as admin areas.
 
-- High-level summary (total tests, critical count)
-- Test breakdown by priority (critical/high/medium/low)
-- Semantic tools summary
-- Key metrics and statistics
+**Signing in.** Pass `credentials` for a test account. The crawler looks for a login form, fills it, submits it, and then crawls as that user. Credentials are never included in the output. They are still tool arguments, though, so they stay in your MCP client's chat history. Don't use a real person's password. Set `enableAutoLogin: false` to crawl without signing in even when credentials are present.
 
-**Use when:**
+If no page could be visited at all, the result is an error that lists the crawl errors.
 
-- Quick overview without full details
-- Sharing brief status updates
-- Embedding in dashboards or status pages
+### get_workflow_by_name
+
+Returns one workflow from a `crawl_multi_page` session.
+
+```json
+{
+  "sessionId": "session_1795871943763_2hl15gbm6",
+  "workflowName": "navigation_menu_exploration"
+}
+```
+
+`workflowName` takes a workflow's name or its ID. Several workflows can share a name (for example, two `form_submission_flow`s on different pages). A name returns the highest-confidence one, plus a note listing the IDs of the others:
+
+```text
+2 workflows are named "form_submission_flow"; returned the highest-confidence one. Fetch the others by passing their ID as workflowName: wf_form_…
+```
+
+Errors list what is available, for example `Session not found: … Available sessions: none` or `Workflow not found: … Available workflows: navigation_menu_exploration (wf_navmenu_…)`.
+
+### export_workflow_visualization
+
+Exports a session's workflows as Markdown, with page sequences, actions and flow diagrams.
+
+| Argument | Required | Default | Notes |
+|---|---|---|---|
+| `sessionId` | Yes | | |
+| `workflowIds` | No | all | Workflow names or IDs |
+| `format` | No | `full` | `individual` (one section per workflow), `comparison` (side by side) or `full` |
+
+```json
+{ "sessionId": "session_1795871943763_2hl15gbm6", "format": "comparison" }
+```
+
+---
+
+## How scoring works
+
+Scoring happens inside the crawled page, in the bundle built by `npm run build:browser`.
+
+1. **Rule-based intent score.** Every visible element gets points for what it is and how it is labelled. For example: a button or `role="button"` +30, a link with `href` +25 (and +30 more if it navigates away), a submit or button input +30, a text, search, email or password input +15, a label or text +15, an id +10, being inside a form +10. Disabled or hidden elements lose 50. Elements scoring 25 or more are kept. See `collectHighIntentElements` in [`src/analyzer.ts`](src/analyzer.ts).
+2. **Model step, when it loads.** The embedding model (`Xenova/all-MiniLM-L6-v2`, or `Xenova/paraphrase-MiniLM-L3-v2` on low-memory devices) merges near-duplicate elements whose descriptions are more than 0.92 similar. Inputs, buttons, links, textareas and selects are never merged.
+3. **Heuristic fallback, when it doesn't.** [`src/heuristic-scorer.ts`](src/heuristic-scorer.ts) re-scores each element from its tag and text patterns (for example sign in, checkout, delete), clamps the score to 0–100, and keeps those scoring 25 or more.
+
+The report's `Analysis Device` line tells you which path ran: `webnn`, `webgpu` or `wasm` for the model, `none` for the heuristic fallback.
+
+Priority comes from the score: **critical** 50 and above, **high** 40–49, **medium** 30–39, **low** below 30. Only critical test cases get a semantic tool, so only they can run in `run_critical_tests`.
+
+---
+
+## Models, downloads and offline use
+
+Two copies of the same model family are used, in two places:
+
+| Used by | Runs in | Model | Download | Cached |
+|---|---|---|---|---|
+| `get_element_locator` | The server (Node) | `Xenova/all-MiniLM-L6-v2`, quantised, about 23 MB | From Hugging Face, the first time it is needed | `node_modules/@huggingface/transformers/.cache` |
+| Page scoring | The crawled page (Chrome) | `Xenova/all-MiniLM-L6-v2` at full precision on CPU (about 90 MB) | From Hugging Face, with the ONNX runtime from cdn.jsdelivr.net | No. Every crawl uses a fresh Chrome profile |
+
+To fetch the locator model ahead of time, run this from the repository folder:
+
+```bash
+node -e "import('@huggingface/transformers').then(({ pipeline }) => pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', { dtype: 'q8' }))"
+```
+
+This only warms the locator model. The in-page scoring model can't be pre-fetched, because each crawl starts with an empty Chrome profile.
+
+The in-page model has 5 seconds per backend to load. `crawl_multi_page` lets you raise that with `modelLoadTimeoutMs`; `crawl_and_analyze` and `run_critical_tests` don't. In practice the download often takes longer, and the crawl uses heuristic scoring. That is normal, and the test cases are still produced.
+
+**Offline, or behind a proxy that blocks these hosts:**
+
+- page scoring uses the heuristic fallback (`Analysis Device: none`);
+- `get_element_locator` uses keyword matching (`keyword only`);
+- the first crawl still needs chromedriver. Selenium Manager downloads it once into `~/.cache/selenium`. If it can't, put a chromedriver that matches your Chrome version on your `PATH`.
+
+A site's Content-Security-Policy can also block the in-page model download, with the same fallback.
 
 ---
 
 ## Troubleshooting
 
-### "Browser not found" Error
+### The server seems to hang after `npm start`
 
-```
-Error: Could not find Chrome/Chromium installation
-```
+It is waiting for an MCP client on stdin. Nothing more will print until a client connects. Stop it with Ctrl+C, and let your MCP client start it instead.
 
-**Solution:**
+### Chrome or chromedriver won't start
 
-1. Install Google Chrome from <https://google.com/chrome>
-2. Selenium Manager downloads a matching chromedriver on first run, so it needs network access the first time.
+Check Chrome is installed. Selenium Manager finds Chrome and downloads a matching chromedriver; that needs internet access the first time. Errors such as `session not created` usually mean the driver and Chrome versions don't match. Update Chrome, or delete `~/.cache/selenium` so Selenium Manager fetches a fresh driver.
 
-### "ML Model failed to load" Error
+### `Chrome could not load … and showed its error page instead`
 
-```
-Error: Failed to initialize ML model
-```
+Chrome couldn't load the URL: a DNS failure, a refused connection, or a bad certificate. Check the URL opens in your own browser.
 
-**Cause:** WebNN/WebGPU unavailable, falling back to CPU inference (slower)
+For an `http://` URL, the message adds a note about HTTPS-First. Chrome tries `https://` first, so an http-only site whose `https://` address fails can't be crawled. Remember that a URL without a scheme gets `https://` added.
 
-**Solution:**
+`audit_aria` shows the raw Chrome error instead, for example `ARIA advisory could not run: unknown error: net::ERR_CONNECTION_REFUSED`.
 
-- Wait longer for WASM model to load (first time is slowest)
-- Check console logs for model loading progress
-- On `crawl_multi_page`, raise `modelLoadTimeoutMs` (default 5000) so the model has time to download before heuristic scoring takes over
+### `Analysis Device: none (heuristic scoring — ML unavailable)`
 
-### "Page load timeout" Error
+The in-page model didn't load in time, or couldn't be downloaded. The results come from the heuristic scorer. See [Models, downloads and offline use](#models-downloads-and-offline-use). For `crawl_multi_page`, try a larger `modelLoadTimeoutMs`.
 
-```
-Error: Page did not load within timeout
-```
+### `Analyzer execution timed out after …ms`
 
-**Solution:**
+The in-page analysis took longer than `analysisTimeoutMs` (90 seconds by default). Very large pages can do this. On `crawl_multi_page`, raise `analysisTimeoutMs` and, if needed, `scriptTimeoutMs`.
 
-- Increase `pageLoadTimeout` on `crawl_multi_page` (up to 180000 ms)
-- Check if URL is accessible (test in browser manually)
-- Try a simpler URL first to ensure system works
+### `get_element_locator` says `No crawl data available`
 
-### "Invalid URL" Error
+Call `crawl_and_analyze` on the page first. `crawl_multi_page` and `run_critical_tests` don't count. The data is also lost if the server restarts.
 
-```
-Error: Invalid URL provided
-```
+### `get_element_locator` finds the wrong element, or nothing
 
-**Solution:**
+It only knows the page from the last `crawl_and_analyze`. Crawl the page the element is actually on. Describe it the way it is labelled on the page. If the result says `keyword only`, the embedding model isn't loaded; see the section above.
 
-- Ensure URL starts with `http://` or `https://`
-- No spaces in URL
-- Test URL is publicly accessible
+### `run_critical_tests` runs nothing, or not the tests I asked for
 
-### ML Model Is Slow on First Run
+Only critical tests (score 50 or more) can run, and tests tagged `destructive` are skipped. If you pass `testIds`, take them from a recent `crawl_and_analyze` of the same URL; the error lists the valid ones.
 
-The Transformers.js model downloads ~50MB on first use. This is normal:
+### `Session not found`
 
-- Subsequent runs are much faster (model cached locally)
-- Model is stored in node_modules or browser cache
-- First crawl may take 30-60 seconds
+Sessions from `crawl_multi_page` live in the server's memory for one hour. They are gone after that, or after the server restarts. Run the crawl again.
 
-**To pre-download model:**
+### No test cases generated
 
-```bash
-node -e "require('@huggingface/transformers').pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2')"
-```
-
-### No Test Cases Generated
-
-**Cause:** All detected elements scored below priority threshold
-
-**Solution:**
-
-- The page may have no interactive elements (very static page)
-- Adjust scoring thresholds in analyzer (see [DEVELOPMENT.md](DEVELOPMENT.md))
-- Try a page with more UI elements (e.g., form, buttons, links)
-
-### Test Runs Return Empty Results
-
-**Cause:** No critical tests to run, or browser context closed
-
-**Solution:**
-
-- Ensure `crawl_and_analyze` was called first
-- Check that test count is > 0 in crawl response
-- Browser context must stay open between tools
-
----
-
-## Performance & Optimization
-
-### Crawl Speed
-
-**Typical crawl time:** 10-30 seconds depending on:
-
-- Page complexity and size
-- Network latency
-- ML model inference (slower on first run)
-
-**To speed up:**
-
-```bash
-# 1. Lower pageLoadTimeout / maxPages on crawl_multi_page for fast sites
-
-# 2. Use summary format (skips detailed analysis)
-curl -d '{"url": "...", "format": "markdown-summary"}' ...
-
-# 3. Pre-load ML model
-node -e "require('@huggingface/transformers').pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2')"
-```
-
-### Memory Usage
-
-- Headless Chrome: ~200-500 MB
-- ML model: ~200 MB (first run, then cached)
-- Test case storage: ~1-5 MB per crawl
-
-**For production servers:** Consider running in separate processes or containers with memory limits.
-
-### Parallelization
-
-Current implementation crawls one URL at a time. For multiple URLs:
-
-```javascript
-async function crawlMultiple(urls) {
-  // Sequential crawling (safer)
-  for (const url of urls) {
-    const result = await crawlAndAnalyze({url});
-    // Process result
-  }
-}
-
-// Or use a worker pool for parallel crawls
-// (Requires Selenium Manager setup for each worker)
-```
-
----
-
-## Integration Examples
-
-### GitHub Actions CI/CD
-
-```yaml
-name: Generate Test Cases
-
-on:
-  pull_request:
-    paths: ['src/**']
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-
-      - uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-
-      - run: npm install
-      - run: npm run build
-
-      - run: npm start &
-        env:
-          TIMEOUT: 30000
-
-      - name: Crawl and generate tests
-        run: |
-          sleep 2  # Wait for server to start
-          curl -X POST http://localhost:3000/tools/crawl_and_analyze \
-            -H "Content-Type: application/json" \
-            -d '{"url": "http://localhost:3001", "format": "markdown"}' \
-            > test-report.md
-
-      - name: Comment PR with report
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const fs = require('fs');
-            const report = fs.readFileSync('test-report.md', 'utf8');
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: report
-            });
-```
-
-### Playwright Integration
-
-```javascript
-// test.spec.js
-import { crawlAndAnalyze, getElementLocator } from 'cartographer-mcp';
-
-describe('Generated tests', () => {
-  test('should pass critical elements', async () => {
-    const {testCases} = await crawlAndAnalyze({
-      url: 'http://localhost:3001',
-      format: 'json'
-    });
-
-    const criticalTests = testCases.filter(t => t.priority === 'critical');
-
-    for (const test of criticalTests) {
-      const {locator} = await getElementLocator({
-        description: test.element
-      });
-
-      const element = page.locator(locator);
-      await expect(element).toBeVisible();
-    }
-  });
-});
-```
-
-### Claude (via MCP)
-
-Once registered with Claude Desktop:
-
-```
-User: "Crawl my website and generate test cases"
-
-Claude: I'll use the crawl_and_analyze tool...
-[runs crawl on specified URL]
-
-Here are the critical test cases I found:
-- Sign In button (score: 87)
-- Email input (score: 79)
-- Submit form button (score: 76)
-
-Would you like me to run these tests or get more specific locators?
-```
-
----
-
-## API Limits
-
-No hard limits, but be aware of:
-
-- **Max page complexity:** ~5000 DOM elements (performance degradation beyond)
-- **Crawl timeout:** Default 30 seconds (configurable)
-- **Model inference:** ~1-2 seconds per crawl for scoring
-- **Memory:** Uses ~200-500 MB Chrome + ~200 MB model
-
----
-
-## Glossary
-
-| Term | Definition |
-|------|-----------|
-| **Intent Score** | 0-100 rating of how important element is for testing |
-| **MCP Tool** | Function exposed via Model Context Protocol |
-| **Semantic Similarity** | How similar two pieces of text/meaning are (0-1 scale) |
-| **Locator** | CSS selector or XPath to identify element on page |
-| **Action Type** | What to do with element (click, input, submit, etc.) |
-| **Priority** | Critical/High/Medium/Low based on intent score |
-| **Headless Chrome** | Chrome browser without UI, controlled by code |
-| **Handler** | Browser-side code that executes tool function |
-
----
-
-## Next Steps
-
-- **Using as MCP tool?** See README [Client Configuration](README.md#client-configuration)
-- **Contributing?** See [DEVELOPMENT.md](DEVELOPMENT.md) for setup and architecture
-- **Issues?** Check [CONTRIBUTING.md](CONTRIBUTING.md) for bug reporting
-
----
-
-**Happy testing!** For more questions, refer to [DEVELOPMENT.md](DEVELOPMENT.md) or contact the maintainers.
+The page may build its content after load, or the elements may be hidden or disabled when the crawl reads the page. Try `CARTOGRAPHER_HEADED=1` to watch what Chrome actually shows.
