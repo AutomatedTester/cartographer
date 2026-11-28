@@ -19,7 +19,7 @@ This guide covers everything you need to contribute to Cartographer: setup, arch
 
 ### Prerequisites
 
-- **Node.js** ≥ 18 (check with `node --version`)
+- **Node.js** 22 or later (check with `node --version`). CI runs 22 and 24; Node 18 and 20 are end-of-life.
 - **Git** (check with `git --version`)
 - **Google Chrome** installed (Selenium Manager auto-configures chromedriver)
 - **A code editor** (VS Code recommended)
@@ -28,27 +28,28 @@ This guide covers everything you need to contribute to Cartographer: setup, arch
 
 ```bash
 # 1. Clone the repository
-git clone <repo-url>
-cd friendly-octo-train
+git clone https://github.com/AutomatedTester/cartographer.git
+cd cartographer
 
 # 2. Install dependencies
 npm install
 
-# 3. Build the project (TypeScript → JavaScript)
-npm run build
+# 3. Build the TypeScript and the in-page analyzer bundle
+npm run build:all
 
-# 4. Verify everything works
+# 4. Verify the server starts
 npm start
 ```
 
-You should see:
+You should see this on stderr, and then nothing more:
 
 ```
-[MCP Server] Starting...
-[MCP Server] Ready to accept connections on stdio
+Cartographer MCP server running on stdio
 ```
 
-Press `Ctrl+C` to stop the server.
+That is expected, not a hang. The server is waiting for an MCP client on stdin. Press `Ctrl+C` to stop it.
+
+The first crawl downloads chromedriver and, inside the page, an embedding model. See [First run: downloads and network](README.md#first-run-downloads-and-network).
 
 ---
 
@@ -56,9 +57,9 @@ Press `Ctrl+C` to stop the server.
 
 ```
 src/
-├── index.ts                          # MCP server entry point (387 lines)
+├── index.ts                          # MCP server entry point
 │   ├── Initializes MCP server
-│   ├── Registers three tools
+│   ├── Registers seven tools
 │   └── Main execution flow
 │
 ├── crawler.ts                        # Selenium browser automation
@@ -205,7 +206,7 @@ npm run dev
 **For Production:**
 
 ```bash
-npm run build
+npm run build:all
 npm start
 # Pre-compiled JavaScript
 # Optimized bundle
@@ -241,27 +242,19 @@ git push origin feature-branch
 
 ### Running the Server Locally
 
-```bash
-# Terminal 1: Start the server
-npm start
+`npm start` builds, prints `Cartographer MCP server running on stdio`, then waits silently for an MCP client on stdin. That is expected, not a hang. Stop it with Ctrl+C.
 
-# Terminal 2: Test with a client
+To try it for real, register `build/index.js` with an MCP client (see [Client Configuration](README.md#client-configuration)). Your client starts its own copy of the server, so you don't need `npm start` running too. Restart the client's server after each rebuild.
+
+To check the server speaks the protocol, run the spawned-server suite. It starts its own server, so nothing else needs to be running:
+
+```bash
 node --test test/integration/mcp-server.test.js
 ```
 
-This tests the `crawl_and_analyze` tool on a test URL.
+### Quicker iteration
 
-### Hot Module Reloading (HMR)
-
-For rapid development, use `npm run dev` to avoid rebuild time:
-
-```bash
-# Terminal 1: Run in dev mode
-npm run dev
-
-# Terminal 2: Keep an editor open, make changes
-# When you save in src/, tsx reloads automatically
-```
+`npm run dev` runs `src/index.ts` with tsx, so you skip the TypeScript build. It does not reload on save; restart it after each change. It still needs `build/analyzer.browser.js`, so rerun `npm run build:browser` after changing anything the analyzer bundle includes.
 
 ---
 
@@ -701,15 +694,12 @@ npm run test:integration
 **Test the full crawl-and-analyze flow:**
 
 ```bash
-npm start &  # Start server in background
-sleep 2
-
-# Call crawl_and_analyze tool
-node --test test/integration/mcp-server.test.js
-
-# Kill server
-pkill -f "node.*index.js"
+npm run benchmark:install            # once
+npm run build:all
+npm run test:integration             # crawls BenchmarkShop through the real tools
 ```
+
+The integration suites start the server and the fixture site themselves. Don't start a server first.
 
 **Test specific components:**
 
